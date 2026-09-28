@@ -9,11 +9,14 @@
  * and are NOT exposed over FTP — map that folder as a device share to read it,
  * the same way a real HyperDeck's SMB/AFP recordings are read.
  */
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 const FPS = 25;
 
@@ -103,22 +106,93 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     }
   };
 
+  /** Scan a folder for media files and probe each one — same shape used at startup for the fixed
+   *  slots and again whenever slot 3 is repointed at a real mapped NAS folder (see below). Probe
+   *  failures are skipped per-file rather than aborting the whole scan (a stray non-media/corrupt
+   *  file on a real share shouldn't take the slot listing down), and the scan is capped so a huge
+   *  real folder doesn't hang the deck.
+   */
+  function scanSlotFiles(dir: string): MockFile[] {
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir).filter((f) => /\.(mov|mp4|mxf|m4v)$/i.test(f)).sort();
+    } catch {
+      return [];
+    }
+    const out: MockFile[] = [];
+    for (const f of names.slice(0, 300)) {
+      try {
+        const full = path.join(dir, f);
+        const d = Number(execFileSync(opts.ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', full]).toString().trim());
+        const tcTag = execFileSync(opts.ffprobe, ['-v', 'error', '-show_entries', 'stream_tags=timecode:format_tags=timecode', '-of', 'default=nw=1:nk=1', full]).toString().trim().split('\n')[0] ?? '';
+        const m = /(\d+):(\d+):(\d+)[:;](\d+)/.exec(tcTag);
+        const tcStart = m ? ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * FPS + Number(m[4]) : 0;
+        out.push({ name: f, frames: Math.round((d || 0) * FPS), format: /\.mp4$/i.test(f) ? 'H.264High' : 'QuickTimeProRes', tcStart });
+      } catch {
+        // unreadable/unprobeable file on a real share — skip it rather than failing the listing
+      }
+    }
+    return out;
+  }
+
   function prepareMedia() {
     if (verbose) console.log('[mock] preparing test clips…');
     makeClip(slots[1].dir, 'Studio Cam A_0001.mov', seconds.camA, '10:00:00:00', 'testsrc2', 'prores');
     makeClip(slots[1].dir, 'Studio Cam A_0002.mov', Math.max(2, Math.round(seconds.camA * 0.6)), '10:05:00:00', 'smptehdbars', 'prores');
     makeClip(slots[2].dir, 'Interview_0001.mp4', seconds.interview, '11:00:00:00', 'rgbtestsrc', 'h264');
     makeClip(slots[3].dir, 'NAS Record_0001.mov', seconds.nas, '12:00:00:00', 'testsrc', 'prores');
-    for (const s of Object.values(slots)) {
-      s.files = fs.readdirSync(s.dir).filter((f) => /\.(mov|mp4)$/.test(f)).sort().map((f) => {
-        const full = path.join(s.dir, f);
-        const d = Number(execFileSync(opts.ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', full]).toString().trim());
-        const tcTag = execFileSync(opts.ffprobe, ['-v', 'error', '-show_entries', 'stream_tags=timecode:format_tags=timecode', '-of', 'default=nw=1:nk=1', full]).toString().trim().split('\n')[0] ?? '';
-        const m = /(\d+):(\d+):(\d+)[:;](\d+)/.exec(tcTag);
-        const tcStart = m ? ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * FPS + Number(m[4]) : 0;
-        return { name: f, frames: Math.round(d * FPS), format: f.endsWith('.mp4') ? 'H.264High' : 'QuickTimeProRes', tcStart };
-      });
+    for (const s of Object.values(slots)) s.files = scanSlotFiles(s.dir);
+  }
+
+  // ------------------------------------------------------- NAS slot 3 <-> selected bookmark
+  // Slot 3 defaults to the canned local `nasDir` demo clip. When a NAS bookmark is selected
+  // (Network storage (deck) settings) and its URL/credentials actually resolve to a reachable
+  // folder on this host, slot 3 is repointed there so it lists (and can play back) what's really
+  // on that share, instead of always showing the fixed demo clip regardless of which NAS is
+  // "selected". Falls back to the demo clip whenever the real share can't be reached, rather than
+  // showing an empty/broken slot.
+  function toUncPath(url: string): string | null {
+    const u = url.trim();
+    if (/^\\\\/.test(u)) return u.replace(/[\\/]+$/, '');
+    const m = /^(?:smb|cifs):\/\/([^/]+)\/?(.*)$/i.exec(u);
+    if (!m) return null;
+    const rest = m[2] ? m[2].replace(/\//g, '\\') : '';
+    return `\\\\${m[1]}${rest ? '\\' + rest : ''}`.replace(/[\\/]+$/, '');
+  }
+  async function connectNas(shareRoot: string, username?: string, password?: string): Promise<boolean> {
+    if (process.platform !== 'win32') return true; // nothing we can automate — just try reading directly
+    if (!username) return true;
+    try {
+      await execFileAsync('net', ['use', shareRoot, '/delete', '/y']).catch(() => {});
+      await execFileAsync('net', ['use', shareRoot, password ?? '', `/user:${username}`, '/persistent:no']);
+      return true;
+    } catch {
+      return false;
     }
+  }
+  let refreshSeq = 0;
+  async function refreshSlot3ForSelection() {
+    const seq = ++refreshSeq;
+    const sel = rest.nas.selected;
+    const bm = sel ? rest.nas.bookmarks.find((x) => x.url === sel) : undefined;
+    const target = sel ? toUncPath(sel) : null;
+    let dir = nasDir;
+    if (target) {
+      const shareRoot = /^(\\\\[^\\]+\\[^\\]+)/.exec(target)?.[1] ?? target;
+      const connected = await connectNas(shareRoot, bm?.username, bm?.password);
+      if (connected) {
+        try {
+          fs.accessSync(target, fs.constants.R_OK);
+          dir = target;
+        } catch {
+          // not reachable from this host — fall back to the demo clip below
+        }
+      }
+    }
+    if (seq !== refreshSeq) return; // superseded by a newer selection change
+    slots[3].dir = dir;
+    slots[3].files = scanSlotFiles(dir);
+    if (deck.slotId === 3) rebuildTimeline();
   }
 
   const tc = (frames: number) => {
@@ -459,18 +533,20 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
         if (!bm) { bm = { url: target }; rest.nas.bookmarks.push(bm); }
         if (b?.username !== undefined) bm.username = b.username;
         if (b?.password !== undefined) bm.password = b.password;
+        if (rest.nas.selected === target) void refreshSlot3ForSelection(); // credentials for the active bookmark changed
         return json(204);
       }
       if (nasBookmarkMatch && req.method === 'DELETE') {
         const target = decodeURIComponent(nasBookmarkMatch[1]);
         rest.nas.bookmarks = rest.nas.bookmarks.filter((x) => x.url !== target);
-        if (rest.nas.selected === target) rest.nas.selected = null;
+        if (rest.nas.selected === target) { rest.nas.selected = null; void refreshSlot3ForSelection(); }
         return json(204);
       }
       if (url === '/media/nas/selected' && req.method === 'GET') return json(200, { selected: rest.nas.selected ? { url: rest.nas.selected } : null });
       if (url === '/media/nas/selected' && req.method === 'PUT') {
         const b = parsedBody as { selected: { url: string } | null };
         rest.nas.selected = b?.selected?.url ?? null;
+        void refreshSlot3ForSelection();
         return json(204);
       }
       if (url === '/media/nas/discovered' && req.method === 'GET') {

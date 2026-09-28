@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { saveSettings, type Settings } from '../config.js';
 import type { EditEntry } from '../devices/edit.js';
 import { CommandError, type DeviceManager } from '../devices/manager.js';
-import { ValidationError, type DeviceInput, type ShareMapping } from '../devices/store.js';
+import { ValidationError, type DeviceInput } from '../devices/store.js';
 import type { TestDeckManager } from '../devices/testDeck.js';
 import type { CredentialStore } from '../devices/credentials.js';
 import type { TimelineStore } from '../devices/timelines.js';
@@ -279,7 +279,7 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     const q = req.query as Record<string, string>;
     const { root, username, password } = resolveNetworkDriveSource(d, q.key ?? '');
     if (!root.trim()) throw new ValidationError('No path configured for this source');
-    if (username) await locator.connectShare({ label: 'thumb', localPath: root, username, password } as ShareMapping);
+    if (username) await locator.ensureConnected(root, username, password);
     const abs = locator.resolveEntryPath(root, q.path ?? '');
     if (!abs) throw new ValidationError('That path is outside the mapped folder.');
     const file = await media.networkThumbnail(d.id, abs);

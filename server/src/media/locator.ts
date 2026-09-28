@@ -44,6 +44,8 @@ const INDEX_TTL = 20_000;
 export class MediaLocator {
   private ftpIndex = new Map<string, { at: number; files: Map<string, IndexedFile>; promise?: Promise<void> }>();
   private shareIndex = new Map<string, { at: number; files: Map<string, IndexedFile> }>();
+  private connectedAt = new Map<string, number>();
+  private connecting = new Map<string, Promise<{ ok: boolean; message: string }>>();
 
   constructor(private readonly bridge: FtpBridge) {}
 
@@ -183,6 +185,32 @@ export class MediaLocator {
   }
 
   /**
+   * Connect a share at most once per few minutes, and only once even when many
+   * requests for it land at the same instant (concurrent callers share the same
+   * in-flight attempt) — Windows `net use` against the same target from several
+   * requests at once (e.g. a folder full of thumbnails loading together) races
+   * and fails, which otherwise looked like "the login doesn't work" when really
+   * it was N simultaneous delete-then-reconnect calls stepping on each other.
+   */
+  async ensureConnected(localPath: string, username?: string, password?: string): Promise<{ ok: boolean; message: string }> {
+    if (!username) return { ok: true, message: 'No credentials needed' };
+    const m = /^(\\\\[^\\]+\\[^\\]+)/.exec(localPath);
+    const shareRoot = (m ? m[1] : localPath).toLowerCase();
+    const last = this.connectedAt.get(shareRoot);
+    if (last && Date.now() - last < 5 * 60_000) return { ok: true, message: 'Already connected' };
+    let p = this.connecting.get(shareRoot);
+    if (!p) {
+      p = this.connectShare({ label: 'auto', localPath, username, password } as ShareMapping).then((r) => {
+        if (r.ok) this.connectedAt.set(shareRoot, Date.now());
+        this.connecting.delete(shareRoot);
+        return r;
+      });
+      this.connecting.set(shareRoot, p);
+    }
+    return p;
+  }
+
+  /**
    * Authenticate this server's own connection to a share, using the
    * credentials stored on the mapping (separate from whatever credentials the
    * HyperDeck itself uses for its NAS bookmark — this server reads the share
@@ -191,7 +219,9 @@ export class MediaLocator {
    * Only automated on Windows so far (`net use`, since `localPath` there is
    * normally a UNC path already and no mount point needs creating). On
    * macOS/Linux the share still needs to be mounted outside the app first
-   * (Finder / an fstab entry) — see docs/RUNNING.txt.
+   * (Finder / an fstab entry) — see docs/RUNNING.txt. Prefer ensureConnected()
+   * above for anything that might be called repeatedly/concurrently — this
+   * method always does a fresh delete-then-reconnect.
    */
   async connectShare(share: ShareMapping): Promise<{ ok: boolean; message: string }> {
     if (!share.username) return { ok: false, message: 'No username set on this share — nothing to connect with.' };
@@ -248,7 +278,7 @@ export class MediaLocator {
   async browse(root: string, subPath: string | undefined, username?: string, password?: string): Promise<{ ok: boolean; message: string; path?: string; entries?: { name: string; isDir: boolean; size?: number; modifiedAt?: string }[] }> {
     if (!root?.trim()) return { ok: false, message: 'No path configured for this source.' };
     if (username) {
-      const conn = await this.connectShare({ label: 'browse', localPath: root, username, password } as ShareMapping);
+      const conn = await this.ensureConnected(root, username, password);
       if (!conn.ok) return conn;
     }
     const resolvedRoot = path.resolve(root);
