@@ -75,6 +75,11 @@ export class MediaService extends EventEmitter {
   /** Separate pool for browsing network shares: independent from deck-clip work so a big,
    *  partly-corrupt NAS folder can't starve the deck's own thumbnails, or vice versa. */
   private netSems = new Map<string, PrioritySemaphore>();
+  /** Filmstrip tiles get their own, wider pool: a strip is 12-120 short independent grabs that
+   *  are mostly I/O-bound (4 at once was ~2x faster than 2 on an SMB share), and with a shared
+   *  pool every clip on the timeline filling its strip used to queue up behind — and hold up —
+   *  thumbnails and the exact frames the scrubber is waiting on. */
+  private stripSems = new Map<string, PrioritySemaphore>();
   /** relPath|size|mtime -> when it last failed to probe/decode, so a corrupt or unreadable
    *  file on a network share isn't retried on every scroll/refresh. */
   private netFailures = new Map<string, number>();
@@ -90,6 +95,12 @@ export class MediaService extends EventEmitter {
     super();
     fs.mkdirSync(cacheDir, { recursive: true });
     setInterval(() => void this.evict().catch(() => {}), 10 * 60_000).unref();
+  }
+
+  private stripSem(deviceId: string) {
+    let s = this.stripSems.get(deviceId);
+    if (!s) this.stripSems.set(deviceId, (s = new PrioritySemaphore(Math.max(4, this.opts.concurrency * 2))));
+    return s;
   }
 
   private sem(deviceId: string) {
@@ -231,7 +242,7 @@ export class MediaService extends EventEmitter {
   private async fillStrip(deviceId: string, m: ClipMedia, status: StripStatus, dir: string) {
     // Breadth-first bisection order so coverage is even while it fills in.
     const order = bisectionOrder(status.count);
-    await Promise.all(order.map((i) => status.ready[i] ? null : this.sem(deviceId).run(PRIO.strip, async () => {
+    await Promise.all(order.map((i) => status.ready[i] ? null : this.stripSem(deviceId).run(PRIO.strip, async () => {
       try {
         const buf = await grabFrame(m.source.input, status.times[i], STRIP_HEIGHT);
         await fs.promises.writeFile(path.join(dir, `${i}.jpg`), buf);
