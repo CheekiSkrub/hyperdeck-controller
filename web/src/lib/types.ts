@@ -81,6 +81,8 @@ export interface Device {
   shares: ShareMapping[];
   createdAt: string;
   state: DeviceState;
+  /** A simulated HyperDeck created from "+ Add test HyperDeck", not a real device. */
+  test?: boolean;
 }
 
 export interface ClipListing {

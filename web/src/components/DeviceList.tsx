@@ -12,7 +12,7 @@ export function DeviceList({ devices, selectedId, onSelect }: { devices: Device[
             <button className={`device-item ${d.id === selectedId ? 'active' : ''}`} onClick={() => onSelect(d.id)}>
               <span className={`dot ${d.state.status}`} title={d.state.status} />
               <span className="device-item-body">
-                <span className="device-item-name">{d.name}</span>
+                <span className="device-item-name">{d.name}{d.test && <span className="badge test">Test</span>}</span>
                 <span className="device-item-meta">{d.host}{d.state.info?.model ? ` · ${d.state.info.model.replace(/^HyperDeck /, '')}` : ''}</span>
               </span>
               {d.state.status === 'connected' && t ? (

@@ -24,6 +24,8 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
   const [busy, setBusy] = useState(false);
   const [test, setTest] = useState<SourcesTest | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [creatingTestDeck, setCreatingTestDeck] = useState(false);
+  const isTestDevice = Boolean(device?.test);
 
   const hostValid = IP_OR_HOST.test(host.trim());
 
@@ -69,19 +71,50 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
     onDeleted();
   };
 
+  const addTestDeck = async () => {
+    setError(null);
+    setCreatingTestDeck(true);
+    try {
+      const saved = await api.createTestDevice();
+      onSaved(saved);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setCreatingTestDeck(false);
+    }
+  };
+
   const updateShare = (i: number, patch: Partial<ShareMapping>) => setShares(shares.map((s, j) => (j === i ? { ...s, ...patch } : s)));
 
   return (
     <Modal title={device ? `Edit ${device.name}` : 'Add HyperDeck'} onClose={onClose}>
       <form onSubmit={save} className="form">
+        {!device && (
+          <div className="test-deck-offer">
+            <button type="button" className="btn ghost" onClick={addTestDeck} disabled={creatingTestDeck}>
+              {creatingTestDeck ? 'Starting simulated deck…' : '▣ Use a simulated test HyperDeck instead'}
+            </button>
+            <p className="muted small">No hardware needed — spins up a fake HyperDeck on this computer with sample clips, so you can try the app or test a workflow.</p>
+          </div>
+        )}
+
+        {isTestDevice && (
+          <div className="banner info" role="note">
+            <strong>Simulated HyperDeck</strong>
+            <p className="muted small">This is a test deck running on this computer, not real hardware. Its connection settings are managed automatically; rename it or remove it below.</p>
+          </div>
+        )}
+
         <label>
           <span>Name</span>
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Studio A Deck 1" />
         </label>
-        <label>
-          <span>IP address</span>
-          <input value={host} onChange={(e) => { setHost(e.target.value); setProbe(null); }} placeholder="192.168.10.50" className={host && !hostValid ? 'invalid' : ''} inputMode="decimal" />
-        </label>
+        {!isTestDevice && (
+          <label>
+            <span>IP address</span>
+            <input value={host} onChange={(e) => { setHost(e.target.value); setProbe(null); }} placeholder="192.168.10.50" className={host && !hostValid ? 'invalid' : ''} inputMode="decimal" />
+          </label>
+        )}
 
         {probe && (
           <div className="banner warn ip-warning" role="alert">
@@ -101,11 +134,13 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
           </div>
         )}
 
+        {!isTestDevice && (
         <button type="button" className="link" onClick={() => setAdvanced(!advanced)}>
           {advanced ? '▾' : '▸'} Media access &amp; advanced
         </button>
+        )}
 
-        {advanced && (
+        {!isTestDevice && advanced && (
           <div className="advanced">
             <div className="row3">
               <label>

@@ -6,6 +6,7 @@ import type { WebSocket } from 'ws';
 import { APP_NAME, defaultDataDir, loadSettings } from './config.js';
 import { DeviceManager } from './devices/manager.js';
 import { DeviceStore } from './devices/store.js';
+import { TestDeckManager } from './devices/testDeck.js';
 import { configureFfmpeg } from './media/ffmpeg.js';
 import { FtpBridge } from './media/ftpBridge.js';
 import { MediaLocator } from './media/locator.js';
@@ -24,6 +25,8 @@ async function main() {
 
   const store = new DeviceStore(dataDir);
   const devices = new DeviceManager(store);
+  const testDecks = new TestDeckManager(store, devices, settings.cacheDir, () => configureFfmpeg(settings));
+  await testDecks.restoreAll();
   const bridge = new FtpBridge();
   bridge.setPort(settings.port);
   const locator = new MediaLocator(bridge);
@@ -55,7 +58,7 @@ async function main() {
   });
 
   bridge.register(app, (id) => store.get(id));
-  await registerApi(app, { devices, media, locator, bridge, settings, dataDir, version: VERSION, ffmpegOk: ff.ok });
+  await registerApi(app, { devices, testDecks, media, locator, bridge, settings, dataDir, version: VERSION, ffmpegOk: ff.ok });
   registerStatic(app);
 
   await app.listen({ port: settings.port, host: settings.host });
@@ -66,6 +69,7 @@ async function main() {
 
   const shutdown = async () => {
     devices.shutdown();
+    await testDecks.shutdown();
     await app.close();
     process.exit(0);
   };

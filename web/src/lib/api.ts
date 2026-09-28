@@ -19,6 +19,7 @@ export type DeviceInput = Partial<Pick<Device, 'name' | 'host' | 'port' | 'restP
 export const api = {
   info: () => req<{ version: string; platform: string; ffmpeg: { ok: boolean; ffmpeg: string } }>('GET', '/api/info'),
   createDevice: (d: DeviceInput) => req<Device>('POST', '/api/devices', d),
+  createTestDevice: (name?: string) => req<Device>('POST', '/api/devices/test', { name }),
   updateDevice: (id: string, d: DeviceInput) => req<Device>('PATCH', `/api/devices/${id}`, d),
   deleteDevice: (id: string) => req<void>('DELETE', `/api/devices/${id}`),
   refresh: (id: string) => req<unknown>('POST', `/api/devices/${id}/refresh`),

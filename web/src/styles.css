@@ -76,6 +76,9 @@ h2 { font-size: 16px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
 .banner { padding: 10px 14px; border-radius: 8px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .banner.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); }
+.banner.info { background: color-mix(in srgb, var(--accent, #4a8) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent, #4a8) 30%, transparent); }
+.test-deck-offer { padding: 10px 14px; border-radius: 8px; border: 1px dashed var(--line); display: flex; flex-direction: column; gap: 6px; }
+.badge.test { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); flex: none; }
 
 /* ------------------------------------------------------------------ buttons */
 .btn {

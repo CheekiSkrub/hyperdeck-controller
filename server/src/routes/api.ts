@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { saveSettings, type Settings } from '../config.js';
 import { CommandError, type DeviceManager } from '../devices/manager.js';
 import { ValidationError, type DeviceInput } from '../devices/store.js';
+import type { TestDeckManager } from '../devices/testDeck.js';
 import { ffmpegPaths, spawnLive } from '../media/ffmpeg.js';
 import type { FtpBridge } from '../media/ftpBridge.js';
 import type { MediaLocator } from '../media/locator.js';
@@ -10,6 +11,7 @@ import type { ClipRef, MediaService } from '../media/service.js';
 
 interface Ctx {
   devices: DeviceManager;
+  testDecks: TestDeckManager;
   media: MediaService;
   locator: MediaLocator;
   bridge: FtpBridge;
@@ -63,6 +65,13 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     reply.status(201);
     return d;
   });
+  // A simulated HyperDeck for trying the app out or testing without real hardware.
+  app.post('/api/devices/test', async (req, reply) => {
+    const b = (req.body ?? {}) as { name?: string };
+    const d = await ctx.testDecks.create(b.name);
+    reply.status(201);
+    return d;
+  });
   app.get<IdParams>('/api/devices/:id', async (req) => ({ ...devices.get(req.params.id), state: devices.client(req.params.id).state }));
   app.patch<IdParams>('/api/devices/:id', async (req) => {
     const d = devices.update(req.params.id, req.body as DeviceInput);
@@ -70,6 +79,7 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     return d;
   });
   app.delete<IdParams>('/api/devices/:id', async (req, reply) => {
+    await ctx.testDecks.stop(req.params.id);
     devices.remove(req.params.id);
     media.invalidate(req.params.id);
     reply.status(204);

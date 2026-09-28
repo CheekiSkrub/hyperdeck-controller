@@ -37,9 +37,11 @@ export interface Device {
   ftp: FtpSettings;
   shares: ShareMapping[];
   createdAt: string;
+  /** True for a simulated HyperDeck created from "+ Add test HyperDeck" (server/src/devices/testDeck.ts). */
+  test?: boolean;
 }
 
-export type DeviceInput = Partial<Omit<Device, 'id' | 'createdAt'>> & { name?: string; host?: string };
+export type DeviceInput = Partial<Omit<Device, 'id' | 'createdAt'>> & { name?: string; host?: string; id?: string };
 
 export class ValidationError extends Error {}
 
@@ -85,7 +87,7 @@ export class DeviceStore {
     if (!name) throw new ValidationError('Name is required');
     const host = validateHost(input.host ?? '');
     const d: Device = {
-      id: crypto.randomUUID(),
+      id: input.id ?? crypto.randomUUID(),
       name,
       host,
       port: validPort(input.port, 9993),
@@ -93,6 +95,7 @@ export class DeviceStore {
       ftp: this.normaliseFtp(input.ftp),
       shares: this.normaliseShares(input.shares),
       createdAt: new Date().toISOString(),
+      test: Boolean(input.test),
     };
     this.devices.push(d);
     this.save();
