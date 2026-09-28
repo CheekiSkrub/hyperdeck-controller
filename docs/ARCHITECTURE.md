@@ -38,6 +38,8 @@ The frame number comes from the browser scrubber, which counts frames in the fil
 
 ### Timeline editing
 
+The timeline works like an NLE (Premiere, Resolve). It has a fixed time scale in pixels per frame and a timecode ruler, and the track is open-ended with space past the last clip. Zoom with Alt/Ctrl + wheel (trackpad pinch works too) around the cursor, with `+`/`−` or with the slider; `\` fits the sequence. A plain wheel scrolls sideways. Clicking or dragging the ruler scrubs the deck. During playback the view page-scrolls to follow the playhead, which is interpolated every frame. `↑`/`↓` jump between edit points. Clips show continuous thumbnails taken from their filmstrips, and the clip name stays visible when a clip's start is scrolled off. The deck's timeline has no gaps, so trims ripple.
+
 The panel's timeline is an editor track. You can drag clips in from the clip browser, drag blocks to reorder them, drag block edges to trim, and right-click to split, duplicate, restore the full clip or remove it. `S` splits at the playhead and `Delete` removes the selected block. In the viewer, `I`/`O` set in and out points and *Add section to timeline* appends that slice.
 
 The protocol can append a portion (`clips add: frame in: frame out: name:`) but can't insert one at a position. Every edit therefore rebuilds the deck timeline in order. It's a handful of commands, and it keeps the panel and the deck exactly in step. The deck timeline can only use clips from the active slot.
