@@ -202,6 +202,22 @@ h2 { font-size: 16px; }
 .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .share { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
 .share .row3 { width: 100%; }
+.share-connect { align-items: end; }
+.share-connect-action { display: flex; flex-direction: column; }
+.share-connect-result.ok { color: #7ee2ad; }
+.share-connect-result.err { color: #ff8589; }
+
+.nas-settings .nas-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.nas-settings .nas-list > li { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.nas-settings .nas-list > li.nas-selected { border-color: color-mix(in srgb, var(--go) 45%, var(--line)); }
+.nas-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.nas-url { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nas-actions { display: flex; gap: 6px; flex: none; }
+.badge.nas-active { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; background: color-mix(in srgb, var(--go) 25%, transparent); color: #7ee2ad; flex: none; }
+.nas-edit { margin-top: 8px; }
+.nas-add { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.nas-add-actions { display: flex; gap: 8px; margin-top: 8px; }
+.nas-hosts { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .form-actions { display: flex; gap: 8px; align-items: center; }
 .confirm { display: inline-flex; gap: 6px; align-items: center; }
 .test-results { margin: 8px 0 0; padding-left: 18px; }

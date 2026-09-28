@@ -1,9 +1,13 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { Client as FtpClient, type FileInfo } from 'basic-ftp';
 import type { Device, ShareMapping } from '../devices/store.js';
 import type { HyperDeckState } from '../hyperdeck/client.js';
 import type { FtpBridge } from './ftpBridge.js';
+
+const execFileAsync = promisify(execFile);
 
 export interface MediaSource {
   kind: 'ftp' | 'share';
@@ -176,6 +180,38 @@ export class MediaLocator {
     const full = path.join(share.localPath, hit.path);
     const st2 = await fs.promises.stat(full).catch(() => null);
     return st2 ? shareSource(share, full, st2) : null;
+  }
+
+  /**
+   * Authenticate this server's own connection to a share, using the
+   * credentials stored on the mapping (separate from whatever credentials the
+   * HyperDeck itself uses for its NAS bookmark — this server reads the share
+   * over its own network path, typically a UNC path or a mount point).
+   *
+   * Only automated on Windows so far (`net use`, since `localPath` there is
+   * normally a UNC path already and no mount point needs creating). On
+   * macOS/Linux the share still needs to be mounted outside the app first
+   * (Finder / an fstab entry) — see docs/RUNNING.txt.
+   */
+  async connectShare(share: ShareMapping): Promise<{ ok: boolean; message: string }> {
+    if (!share.username) return { ok: false, message: 'No username set on this share — nothing to connect with.' };
+    if (process.platform !== 'win32') {
+      return { ok: false, message: `Automatic connection isn't supported on ${process.platform} yet — mount the share first (Finder, or an fstab/cifs entry), then Test.` };
+    }
+    if (!/^\\\\/.test(share.localPath)) {
+      return { ok: false, message: `"${share.localPath}" isn't a UNC path (\\\\server\\share) — net use needs one to attach credentials to.` };
+    }
+    // \\server\share\sub\folder -> \\server\share (net use authenticates the share, not a subfolder).
+    const m = /^(\\\\[^\\]+\\[^\\]+)/.exec(share.localPath);
+    const target = m ? m[1] : share.localPath;
+    try {
+      await execFileAsync('net', ['use', target, '/delete', '/y']).catch(() => {}); // drop any stale/mismatched session first
+      await execFileAsync('net', ['use', target, share.password ?? '', `/user:${share.username}`, '/persistent:no']);
+      return { ok: true, message: `Connected to ${target} as ${share.username}` };
+    } catch (e) {
+      const msg = ((e as { stderr?: string; message: string }).stderr || (e as Error).message).trim();
+      return { ok: false, message: `net use failed: ${msg}` };
+    }
   }
 
   /** Diagnostics for the settings UI. */

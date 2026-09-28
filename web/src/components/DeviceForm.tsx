@@ -85,6 +85,17 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
   };
 
   const updateShare = (i: number, patch: Partial<ShareMapping>) => setShares(shares.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  const [connectResult, setConnectResult] = useState<Record<string, { busy: boolean; ok?: boolean; message?: string }>>({});
+  const connectShare = async (shareId: string) => {
+    if (!device) return;
+    setConnectResult((r) => ({ ...r, [shareId]: { busy: true } }));
+    try {
+      const r = await api.connectShare(device.id, shareId);
+      setConnectResult((r0) => ({ ...r0, [shareId]: { busy: false, ok: r.ok, message: r.message } }));
+    } catch (e) {
+      setConnectResult((r0) => ({ ...r0, [shareId]: { busy: false, ok: false, message: (e as Error).message } }));
+    }
+  };
 
   return (
     <Modal title={device ? `Edit ${device.name}` : 'Add HyperDeck'} onClose={onClose}>
@@ -179,6 +190,23 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
                     <label><span>HyperDeck URL (optional)</span><input value={s.url ?? ''} onChange={(e) => updateShare(i, { url: e.target.value })} placeholder="smb://nas.local/Recordings" /></label>
                     <label><span>Path on this server</span><input value={s.localPath} onChange={(e) => updateShare(i, { localPath: e.target.value })} placeholder="\\nas\Recordings or /Volumes/Recordings" /></label>
                   </div>
+                  <div className="row3 share-connect">
+                    <label><span>Username</span><input value={s.username ?? ''} onChange={(e) => updateShare(i, { username: e.target.value })} placeholder="This server's own login for the share" /></label>
+                    <label><span>Password</span><input type="password" value={s.password ?? ''} onChange={(e) => updateShare(i, { password: e.target.value })} /></label>
+                    <label className="share-connect-action">
+                      <span>&nbsp;</span>
+                      {s.id ? (
+                        <button type="button" className="btn small ghost" disabled={connectResult[s.id]?.busy} onClick={() => connectShare(s.id!)}>
+                          {connectResult[s.id]?.busy ? 'Connecting…' : 'Connect'}
+                        </button>
+                      ) : (
+                        <span className="muted small">Save first to connect</span>
+                      )}
+                    </label>
+                  </div>
+                  {s.id && connectResult[s.id]?.message && (
+                    <p className={`small share-connect-result ${connectResult[s.id].ok ? 'ok' : 'err'}`}>{connectResult[s.id].message}</p>
+                  )}
                   <button type="button" className="btn small ghost" onClick={() => setShares(shares.filter((_, j) => j !== i))}>Remove</button>
                 </div>
               ))}

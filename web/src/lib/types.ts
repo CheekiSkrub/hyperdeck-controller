@@ -69,6 +69,20 @@ export interface ShareMapping {
   label: string;
   url?: string;
   localPath: string;
+  /** This server's own credentials for connecting to the share (separate from the deck's NAS bookmark credentials). */
+  username?: string;
+  password?: string;
+}
+
+/** The deck's own saved network-storage destination (Ethernet protocol `nas`, or REST `/media/nas/...`). */
+export interface NasBookmark {
+  url: string;
+}
+
+export interface NasHost {
+  hostName: string;
+  friendlyName?: string;
+  ip: string;
 }
 
 export interface Device {

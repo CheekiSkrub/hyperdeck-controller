@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import type { DeckSetting, DeckSettings, Device } from '../lib/types';
+import { NasSettings } from './NasSettings';
 
 /** Order groups the way the deck's own menu does. */
 const GROUP_ORDER = ['Record', 'Video', 'Audio', 'Timecode', 'Playback', 'System'];
@@ -79,6 +80,8 @@ export function SettingsPanel({ device, notify }: { device: Device; notify: (m: 
             new address before saving and warns you if it can't reach it.
           </p>
         </section>
+
+        <NasSettings device={device} notify={notify} />
 
         <DeviceActions device={device} notify={notify} />
       </div>

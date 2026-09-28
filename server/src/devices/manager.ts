@@ -7,6 +7,7 @@ import { HyperDeckRest } from '../hyperdeck/rest.js';
 import { deviceAction, readSettings, SettingError, writeSetting } from './settings.js';
 import { fpsFromVideoFormat, timecodeToFrames, type TransportInfo } from '../hyperdeck/protocol.js';
 import { applyEdit, EditError, validateEdit, type DerivedEntry } from './edit.js';
+import * as nas from '../hyperdeck/nas.js';
 import type { Device, DeviceInput, DeviceStore } from './store.js';
 
 export interface ClipListing {
@@ -107,6 +108,49 @@ export class DeviceManager extends EventEmitter {
     this.clients.set(d.id, c);
     this.rests.set(d.id, new HyperDeckRest(d.host, d.restPort));
     c.connect();
+  }
+
+  // ---------------------------------------------------------------- deck-side NAS bookmarks
+
+  private restFor(id: string): HyperDeckRest {
+    const r = this.rests.get(id);
+    if (!r) throw new CommandError('Device not found', 404);
+    return r;
+  }
+
+  async nasBookmarks(id: string) {
+    try { return await nas.listBookmarks(this.restFor(id)); } catch (e) { throw toCommandError(e); }
+  }
+
+  async nasDiscover(id: string) {
+    try { return await nas.discover(this.restFor(id)); } catch (e) { throw toCommandError(e); }
+  }
+
+  async nasSelected(id: string) {
+    try { return await nas.getSelected(this.restFor(id)); } catch (e) { throw toCommandError(e); }
+  }
+
+  async addNasBookmark(id: string, url: string, username?: string, password?: string) {
+    if (!url.trim()) throw new CommandError('Enter the share URL, e.g. smb://nas.local/Recordings', 400);
+    try { await nas.addBookmark(this.restFor(id), url.trim(), username, password); } catch (e) { throw toCommandError(e); }
+  }
+
+  async setNasBookmarkCredentials(id: string, url: string, username?: string, password?: string) {
+    try { await nas.setBookmarkCredentials(this.restFor(id), url, username, password); } catch (e) { throw toCommandError(e); }
+  }
+
+  async removeNasBookmark(id: string, url: string) {
+    try { await nas.removeBookmark(this.restFor(id), url); } catch (e) { throw toCommandError(e); }
+  }
+
+  /** Mount (or, with url null, unmount) a bookmarked share as the deck's active network storage. */
+  async selectNas(id: string, url: string | null) {
+    try {
+      await nas.select(this.restFor(id), url);
+      await this.client(id).refreshSlots().catch(() => {});
+    } catch (e) {
+      throw toCommandError(e);
+    }
   }
 
   // ---------------------------------------------------------------------------

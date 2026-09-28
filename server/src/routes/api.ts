@@ -170,6 +170,35 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     return devices.loadClip(req.params.id, { ...b, frame: Number(b.frame) || 0 });
   });
 
+  // ------------------------------------------------------------------ Deck-side NAS bookmarks
+
+  app.get<IdParams>('/api/devices/:id/nas/bookmarks', async (req) => devices.nasBookmarks(req.params.id));
+  app.post<IdParams>('/api/devices/:id/nas/bookmarks', async (req, reply) => {
+    const b = req.body as { url: string; username?: string; password?: string };
+    await devices.addNasBookmark(req.params.id, b?.url ?? '', b?.username, b?.password);
+    reply.status(201);
+    return devices.nasBookmarks(req.params.id);
+  });
+  app.put<IdParams>('/api/devices/:id/nas/bookmarks', async (req) => {
+    const b = req.body as { url: string; username?: string; password?: string };
+    if (!b?.url) throw new ValidationError('url is required');
+    await devices.setNasBookmarkCredentials(req.params.id, b.url, b.username, b.password);
+    return devices.nasBookmarks(req.params.id);
+  });
+  app.post<IdParams>('/api/devices/:id/nas/bookmarks/remove', async (req) => {
+    const b = req.body as { url: string };
+    if (!b?.url) throw new ValidationError('url is required');
+    await devices.removeNasBookmark(req.params.id, b.url);
+    return devices.nasBookmarks(req.params.id);
+  });
+  app.get<IdParams>('/api/devices/:id/nas/selected', async (req) => ({ url: await devices.nasSelected(req.params.id) }));
+  app.post<IdParams>('/api/devices/:id/nas/select', async (req) => {
+    const b = (req.body ?? {}) as { url: string | null };
+    await devices.selectNas(req.params.id, b.url ?? null);
+    return { url: await devices.nasSelected(req.params.id) };
+  });
+  app.get<IdParams>('/api/devices/:id/nas/discovered', async (req) => devices.nasDiscover(req.params.id));
+
   // ------------------------------------------------------------------ Media sources
 
   app.get<IdParams>('/api/devices/:id/sources/test', async (req) => {
@@ -177,6 +206,14 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     const ftp = d.ftp.enabled ? await locator.testFtp(d) : { ok: false, message: 'FTP disabled' };
     const shares = await Promise.all(d.shares.map(async (s) => ({ id: s.id, label: s.label, ...(await locator.testShare(s)) })));
     return { ftp, shares, nasUrl: devices.client(d.id).state.nasUrl };
+  });
+
+  // Authenticate this server's own connection to a share (separate from the deck's own NAS bookmark credentials).
+  app.post<{ Params: { id: string; shareId: string } }>('/api/devices/:id/sources/:shareId/connect', async (req) => {
+    const d = devices.get(req.params.id);
+    const share = d.shares.find((s) => s.id === req.params.shareId);
+    if (!share) throw new ValidationError('Share not found');
+    return locator.connectShare(share);
   });
 
   app.get<IdParams>('/api/devices/:id/media/info', async (req) => {

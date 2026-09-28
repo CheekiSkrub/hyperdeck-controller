@@ -1,4 +1,4 @@
-import type { AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo } from './types';
+import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost} from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -41,6 +41,18 @@ export const api = {
   loadTimeline: (tid: string) => req<EditEntry[]>('POST', `/api/timelines/${tid}/load`),
   instantReplay: (sourceId: string, body: { seconds: number; targetId: string; mode?: 'append' | 'replace' }) =>
     req<{ source: { file: string; frames: number; fps: number }; inFrames: number; outFrames: number; edit: EditEntry[] }>('POST', `/api/devices/${sourceId}/instant-replay`, body),
+  connectShare: (id: string, shareId: string) => req<{ ok: boolean; message: string }>('POST', `/api/devices/${id}/sources/${shareId}/connect`),
+
+  nasBookmarks: (id: string) => req<NasBookmark[]>('GET', `/api/devices/${id}/nas/bookmarks`),
+  addNasBookmark: (id: string, url: string, username?: string, password?: string) =>
+    req<NasBookmark[]>('POST', `/api/devices/${id}/nas/bookmarks`, { url, username, password }),
+  setNasBookmarkCredentials: (id: string, url: string, username?: string, password?: string) =>
+    req<NasBookmark[]>('PUT', `/api/devices/${id}/nas/bookmarks`, { url, username, password }),
+  removeNasBookmark: (id: string, url: string) => req<NasBookmark[]>('POST', `/api/devices/${id}/nas/bookmarks/remove`, { url }),
+  nasSelected: (id: string) => req<{ url: string | null }>('GET', `/api/devices/${id}/nas/selected`),
+  selectNas: (id: string, url: string | null) => req<{ url: string | null }>('POST', `/api/devices/${id}/nas/select`, { url }),
+  nasDiscover: (id: string) => req<NasHost[]>('GET', `/api/devices/${id}/nas/discovered`),
+
   originalUrl: (id: string, slot: number, file: string): string | null => `/api/devices/${id}/media/original?${q(slot, file)}`,
   liveUrl: (id: string, slot: number, file: string, seconds: number): string | null =>
     `/api/devices/${id}/media/live?${q(slot, file)}&t=${seconds.toFixed(3)}`,

@@ -17,6 +17,9 @@ export interface ShareMapping {
   url?: string;
   /** Where this server can read the same files: UNC path, /Volumes/..., /mnt/... */
   localPath: string;
+  /** Credentials for this server's own connection to the share (separate from the deck's own NAS bookmark credentials). */
+  username?: string;
+  password?: string;
 }
 
 export interface FtpSettings {
@@ -142,6 +145,8 @@ export class DeviceStore {
         label: s.label?.trim() || s.url || s.localPath!,
         url: s.url?.trim() || undefined,
         localPath: s.localPath!.trim(),
+        username: s.username?.trim() || undefined,
+        password: s.password || undefined,
       };
     });
   }
