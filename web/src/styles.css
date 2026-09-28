@@ -395,3 +395,18 @@ h2 { font-size: 16px; }
   clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
 }
 .nle .tl-drop { top: 0; bottom: 0; }
+
+.saved-timelines { position: relative; }
+.saved-timelines-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 20;
+  width: 280px; max-height: 360px; overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+.saved-timelines-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.saved-timelines-list li { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 2px; border-radius: 6px; }
+.saved-timelines-list li:hover { background: var(--panel-2); }
+.stl-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.stl-actions { display: inline-flex; gap: 2px; flex: none; }
+.stl-new { display: flex; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.stl-new input { flex: 1; min-width: 0; }

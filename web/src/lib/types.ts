@@ -160,6 +160,15 @@ export interface DeckSettings {
   errors: string[];
 }
 
+export interface SavedTimeline {
+  id: string;
+  deviceId: string;
+  name: string;
+  entries: EditEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AddressCheck {
   reachable: boolean;
   model?: string;

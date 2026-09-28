@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { saveSettings, type Settings } from '../config.js';
+import type { EditEntry } from '../devices/edit.js';
 import { CommandError, type DeviceManager } from '../devices/manager.js';
 import { ValidationError, type DeviceInput } from '../devices/store.js';
 import type { TestDeckManager } from '../devices/testDeck.js';
+import type { TimelineStore } from '../devices/timelines.js';
 import { ffmpegPaths, spawnLive } from '../media/ffmpeg.js';
 import type { FtpBridge } from '../media/ftpBridge.js';
 import type { MediaLocator } from '../media/locator.js';
@@ -12,6 +14,7 @@ import type { ClipRef, MediaService } from '../media/service.js';
 interface Ctx {
   devices: DeviceManager;
   testDecks: TestDeckManager;
+  timelines: TimelineStore;
   media: MediaService;
   locator: MediaLocator;
   bridge: FtpBridge;
@@ -82,6 +85,7 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     await ctx.testDecks.stop(req.params.id);
     devices.remove(req.params.id);
     media.invalidate(req.params.id);
+    ctx.timelines.removeForDevice(req.params.id);
     reply.status(204);
   });
 
@@ -108,6 +112,35 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
 
   app.put<IdParams>('/api/devices/:id/edit', async (req) => {
     return devices.setEdit(req.params.id, (req.body as { entries: unknown }).entries);
+  });
+
+  // ------------------------------------------------------------------ Saved timelines
+
+  app.get<IdParams>('/api/devices/:id/timelines', async (req) => ctx.timelines.list(req.params.id));
+
+  app.post<IdParams>('/api/devices/:id/timelines', async (req, reply) => {
+    const b = req.body as { name: string; entries?: EditEntry[] };
+    if (!b?.name) throw new ValidationError('Name is required');
+    const entries = b.entries ?? devices.client(req.params.id).state.edit;
+    const t = ctx.timelines.create(req.params.id, b.name, entries);
+    reply.status(201);
+    return t;
+  });
+
+  app.patch<{ Params: { tid: string } }>('/api/timelines/:tid', async (req) => {
+    const b = req.body as { name?: string; entries?: EditEntry[] };
+    return ctx.timelines.update(req.params.tid, b);
+  });
+
+  app.delete<{ Params: { tid: string } }>('/api/timelines/:tid', async (req, reply) => {
+    ctx.timelines.remove(req.params.tid);
+    reply.status(204);
+  });
+
+  app.post<{ Params: { tid: string } }>('/api/timelines/:tid/load', async (req) => {
+    const t = ctx.timelines.get(req.params.tid);
+    if (!t) throw new ValidationError('Saved timeline not found');
+    return devices.setEdit(t.deviceId, t.entries);
   });
 
   // Instant replay: take the last N seconds of :id's current/most recent clip

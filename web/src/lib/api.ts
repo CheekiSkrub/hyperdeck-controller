@@ -1,4 +1,4 @@
-import type { AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SourcesTest, StripStatus, TransportInfo } from './types';
+import type { AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo } from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -32,6 +32,13 @@ export const api = {
   action: (id: string, action: string, body?: Record<string, unknown>) => req<{ ok: boolean }>('POST', `/api/devices/${id}/actions/${action}`, body ?? {}),
   probe: (host: string, port?: number) => req<AddressCheck>('POST', '/api/probe', { host, port }),
   setEdit: (id: string, entries: EditEntry[]) => req<EditEntry[]>('PUT', `/api/devices/${id}/edit`, { entries }),
+
+  timelines: (id: string) => req<SavedTimeline[]>('GET', `/api/devices/${id}/timelines`),
+  saveTimeline: (id: string, name: string, entries?: EditEntry[]) => req<SavedTimeline>('POST', `/api/devices/${id}/timelines`, { name, entries }),
+  renameTimeline: (tid: string, name: string) => req<SavedTimeline>('PATCH', `/api/timelines/${tid}`, { name }),
+  overwriteTimeline: (tid: string, entries: EditEntry[]) => req<SavedTimeline>('PATCH', `/api/timelines/${tid}`, { entries }),
+  deleteTimeline: (tid: string) => req<void>('DELETE', `/api/timelines/${tid}`),
+  loadTimeline: (tid: string) => req<EditEntry[]>('POST', `/api/timelines/${tid}/load`),
   instantReplay: (sourceId: string, body: { seconds: number; targetId: string; mode?: 'append' | 'replace' }) =>
     req<{ source: { file: string; frames: number; fps: number }; inFrames: number; outFrames: number; edit: EditEntry[] }>('POST', `/api/devices/${sourceId}/instant-replay`, body),
   originalUrl: (id: string, slot: number, file: string): string | null => `/api/devices/${id}/media/original?${q(slot, file)}`,
