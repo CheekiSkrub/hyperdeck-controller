@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
 import type { AddressCheck, Device, ShareMapping, SourcesTest } from '../lib/types';
+import { CredentialPicker } from './CredentialPicker';
 import { Modal } from './Modal';
 
 const IP_OR_HOST = /^((\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?)$/;
@@ -193,6 +194,7 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
                   <div className="row3 share-connect">
                     <label><span>Username</span><input value={s.username ?? ''} onChange={(e) => updateShare(i, { username: e.target.value })} placeholder="This server's own login for the share" /></label>
                     <label><span>Password</span><input type="password" value={s.password ?? ''} onChange={(e) => updateShare(i, { password: e.target.value })} /></label>
+                    <CredentialPicker onPick={(c) => updateShare(i, { username: c.username, password: c.password })} />
                     <label className="share-connect-action">
                       <span>&nbsp;</span>
                       {s.id ? (

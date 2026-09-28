@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DeviceForm } from './components/DeviceForm';
 import { DeviceList } from './components/DeviceList';
 import { DeviceView } from './components/DeviceView';
+import { SettingsPage } from './components/SettingsPage';
 import { api } from './lib/api';
 import { DEMO_BANNER, useDevices, useServerConnected } from './lib/store';
 import type { Device } from './lib/types';
@@ -22,6 +23,14 @@ export function App() {
   const online = useServerConnected();
   const [selectedId, select] = useHashDevice();
   const [editing, setEditing] = useState<Device | 'new' | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notify = useCallback((text: string, kind: 'ok' | 'err' = 'err') => {
+    setToast({ text, kind });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  }, []);
   const selected = devices.find((d) => d.id === selectedId) ?? null;
   const [ffmpegMissing, setFfmpegMissing] = useState(false);
   useEffect(() => {
@@ -44,7 +53,10 @@ export function App() {
           </div>
         </div>
         <DeviceList devices={devices} selectedId={selected?.id ?? null} onSelect={select} />
-        <button className="btn add-device" onClick={() => setEditing('new')}>+ Add HyperDeck</button>
+        <div className="sidebar-actions">
+          <button className="btn add-device" onClick={() => setEditing('new')}>+ Add HyperDeck</button>
+          <button className="btn ghost" onClick={() => setShowSettings(true)} title="Controller settings">⚙ Settings</button>
+        </div>
       </aside>
 
       <main className="main">
@@ -74,6 +86,8 @@ export function App() {
           onDeleted={() => { setEditing(null); select(null); }}
         />
       )}
+      {showSettings && <SettingsPage onClose={() => setShowSettings(false)} notify={notify} />}
+      {toast && <div className={`toast ${toast.kind}`} role="status">{toast.text}</div>}
     </div>
   );
 }

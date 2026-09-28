@@ -1,4 +1,4 @@
-import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost} from './types';
+import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost, AppSettings, NasCredential} from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -18,6 +18,15 @@ export type DeviceInput = Partial<Pick<Device, 'name' | 'host' | 'port' | 'restP
 
 export const api = {
   info: () => req<{ version: string; platform: string; ffmpeg: { ok: boolean; ffmpeg: string } }>('GET', '/api/info'),
+  appSettings: () => req<AppSettings>('GET', '/api/settings'),
+  updateAppSettings: (patch: Partial<AppSettings>) => req<AppSettings & { restartRequired: boolean }>('PATCH', '/api/settings', patch),
+
+  credentials: () => req<NasCredential[]>('GET', '/api/credentials'),
+  createCredential: (label: string, username: string, password?: string) =>
+    req<NasCredential>('POST', '/api/credentials', { label, username, password }),
+  updateCredential: (id: string, patch: { label?: string; username?: string; password?: string }) =>
+    req<NasCredential>('PATCH', `/api/credentials/${id}`, patch),
+  deleteCredential: (id: string) => req<void>('DELETE', `/api/credentials/${id}`),
   createDevice: (d: DeviceInput) => req<Device>('POST', '/api/devices', d),
   createTestDevice: (name?: string) => req<Device>('POST', '/api/devices/test', { name }),
   updateDevice: (id: string, d: DeviceInput) => req<Device>('PATCH', `/api/devices/${id}`, d),

@@ -183,6 +183,28 @@ export interface SavedTimeline {
   updatedAt: string;
 }
 
+export interface AppSettings {
+  port: number;
+  host: string;
+  ffmpegPath?: string;
+  ffprobePath?: string;
+  cacheDir: string;
+  maxCacheGB: number;
+  mediaConcurrency: number;
+  proxyHeight: number;
+  openBrowser: boolean;
+}
+
+/** A saved NAS/SMB login, reusable when filling in a device's share mapping or NAS bookmark. */
+export interface NasCredential {
+  id: string;
+  label: string;
+  username: string;
+  password: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AddressCheck {
   reachable: boolean;
   model?: string;

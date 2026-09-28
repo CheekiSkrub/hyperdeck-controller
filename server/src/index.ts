@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
 import { APP_NAME, defaultDataDir, loadSettings } from './config.js';
+import { CredentialStore } from './devices/credentials.js';
 import { DeviceManager } from './devices/manager.js';
 import { DeviceStore } from './devices/store.js';
 import { TestDeckManager } from './devices/testDeck.js';
@@ -29,6 +30,7 @@ async function main() {
   const testDecks = new TestDeckManager(store, devices, settings.cacheDir, () => configureFfmpeg(settings));
   await testDecks.restoreAll();
   const timelines = new TimelineStore(dataDir);
+  const credentials = new CredentialStore(dataDir);
   const bridge = new FtpBridge();
   bridge.setPort(settings.port);
   const locator = new MediaLocator(bridge);
@@ -60,7 +62,7 @@ async function main() {
   });
 
   bridge.register(app, (id) => store.get(id));
-  await registerApi(app, { devices, testDecks, timelines, media, locator, bridge, settings, dataDir, version: VERSION, ffmpegOk: ff.ok });
+  await registerApi(app, { devices, testDecks, timelines, credentials, media, locator, bridge, settings, dataDir, version: VERSION, ffmpegOk: ff.ok });
   registerStatic(app);
 
   await app.listen({ port: settings.port, host: settings.host });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import type { Device, NasBookmark, NasHost } from '../lib/types';
+import { CredentialPicker } from './CredentialPicker';
 
 /**
  * The HyperDeck's own network-storage destination — what it records/plays to
@@ -153,6 +154,7 @@ export function NasSettings({ device, notify }: { device: Device; notify: (m: st
                 <div className="row3 nas-edit">
                   <label><span>Username</span><input value={editUser} onChange={(e) => setEditUser(e.target.value)} /></label>
                   <label><span>Password</span><input type="password" value={editPass} onChange={(e) => setEditPass(e.target.value)} /></label>
+                  <CredentialPicker onPick={(c) => { setEditUser(c.username); setEditPass(c.password); }} />
                   <label className="share-connect-action">
                     <span>&nbsp;</span>
                     <button type="button" className="btn small primary" disabled={busy !== null} onClick={() => saveCredentials(b.url)}>Save</button>
@@ -169,6 +171,7 @@ export function NasSettings({ device, notify }: { device: Device; notify: (m: st
           <label><span>New mapping URL</span><input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="smb://nas.local/Recordings" /></label>
           <label><span>Username</span><input value={newUser} onChange={(e) => setNewUser(e.target.value)} /></label>
           <label><span>Password</span><input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} /></label>
+          <CredentialPicker onPick={(c) => { setNewUser(c.username); setNewPass(c.password); }} />
         </div>
         <div className="nas-add-actions">
           <button type="button" className="btn small ghost" disabled={discovering} onClick={discover}>{discovering ? 'Searching…' : 'Discover'}</button>

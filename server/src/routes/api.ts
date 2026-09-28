@@ -5,6 +5,7 @@ import type { EditEntry } from '../devices/edit.js';
 import { CommandError, type DeviceManager } from '../devices/manager.js';
 import { ValidationError, type DeviceInput } from '../devices/store.js';
 import type { TestDeckManager } from '../devices/testDeck.js';
+import type { CredentialStore } from '../devices/credentials.js';
 import type { TimelineStore } from '../devices/timelines.js';
 import { ffmpegPaths, spawnLive } from '../media/ffmpeg.js';
 import type { FtpBridge } from '../media/ftpBridge.js';
@@ -15,6 +16,7 @@ interface Ctx {
   devices: DeviceManager;
   testDecks: TestDeckManager;
   timelines: TimelineStore;
+  credentials: CredentialStore;
   media: MediaService;
   locator: MediaLocator;
   bridge: FtpBridge;
@@ -58,6 +60,23 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     for (const k of allowed) if (k in body) (ctx.settings as any)[k] = (body as any)[k];
     saveSettings(ctx.dataDir, ctx.settings);
     return { ...ctx.settings, restartRequired: true };
+  });
+
+  // ------------------------------------------------------------------ Saved NAS credentials
+  // A reusable "fill in the username/password" list, shared across every device's share
+  // mappings and NAS bookmarks — not a live link, just saves retyping the same login.
+
+  app.get('/api/credentials', async () => ctx.credentials.list());
+  app.post('/api/credentials', async (req, reply) => {
+    const c = ctx.credentials.create(req.body as { label?: string; username?: string; password?: string });
+    reply.status(201);
+    return c;
+  });
+  app.patch<{ Params: { id: string } }>('/api/credentials/:id', async (req) =>
+    ctx.credentials.update(req.params.id, req.body as { label?: string; username?: string; password?: string }));
+  app.delete<{ Params: { id: string } }>('/api/credentials/:id', async (req, reply) => {
+    ctx.credentials.remove(req.params.id);
+    reply.status(204);
   });
 
   // ------------------------------------------------------------------ Devices CRUD
