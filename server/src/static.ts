@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { isDevBuild } from './buildInfo.js';
 
 const TYPES: Record<string, string> = {
@@ -26,25 +26,32 @@ const TYPES: Record<string, string> = {
  * localhost. Set HDC_WEB_DIR to opt out and serve a specific build.
  */
 export function registerStatic(app: FastifyInstance) {
-  if (isDevBuild && !process.env.HDC_WEB_DIR) {
-    const vitePort = Number(process.env.HDC_VITE_PORT) || 5173;
-    app.addHook('onRequest', async (req, reply) => {
-      if (req.method !== 'GET' || req.url.startsWith('/api/') || req.url.startsWith('/ws')) return;
-      if (!['localhost', '127.0.0.1', '::1', '[::1]'].includes(req.hostname)) return;
-      const host = req.hostname.includes(':') && !req.hostname.startsWith('[') ? `[${req.hostname}]` : req.hostname;
-      return reply.redirect(`http://${host}:${vitePort}${req.url}`, 302);
-    });
-  }
+  // Only the page fallback redirects — it runs solely for URLs no other route claims, so the
+  // API, WebSocket and the internal FTP bridge (which ffmpeg fetches over loopback) are never
+  // bounced to Vite. (A global onRequest hook here once did exactly that and broke FTP media.)
+  const devRedirect = isDevBuild && !process.env.HDC_WEB_DIR;
+  const vitePort = Number(process.env.HDC_VITE_PORT) || 5173;
+  const redirectToVite = (req: FastifyRequest, reply: FastifyReply) => {
+    if (!devRedirect || !['localhost', '127.0.0.1', '::1', '[::1]'].includes(req.hostname)) return false;
+    const host = req.hostname.includes(':') && !req.hostname.startsWith('[') ? `[${req.hostname}]` : req.hostname;
+    void reply.redirect(`http://${host}:${vitePort}${req.url}`, 302);
+    return true;
+  };
+
   const files = loadEmbedded() ?? loadFromDisk();
   if (!files) {
-    app.get('/', async (_req, reply) => reply.type('text/html').send(
-      '<h1>HyperDeck Controller</h1><p>Web panel not built. Run <code>npm run build --workspace web</code> or use the Vite dev server on :5173.</p>',
-    ));
+    app.get('/', async (req, reply) => {
+      if (redirectToVite(req, reply)) return reply;
+      return reply.type('text/html').send(
+        '<h1>HyperDeck Controller</h1><p>Web panel not built. Run <code>npm run build --workspace web</code> or use the Vite dev server on :5173.</p>',
+      );
+    });
     return;
   }
   app.get('/*', async (req, reply) => {
     let p = decodeURIComponent((req.params as { '*': string })['*'] || 'index.html');
-    if (p.startsWith('api/')) return reply.status(404).send({ error: 'Not found' });
+    if (p.startsWith('api/') || p.startsWith('internal/')) return reply.status(404).send({ error: 'Not found' });
+    if (redirectToVite(req, reply)) return reply;
     if (!files.has(p)) p = 'index.html'; // SPA fallback
     const body = files.get(p)!;
     reply.header('Content-Type', TYPES[path.extname(p)] ?? 'application/octet-stream');
