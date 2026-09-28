@@ -1,15 +1,21 @@
 import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost, AppSettings, NasCredential, NetworkDriveSource, NetworkDriveEntry} from './types';
+import { beginRequest } from './busy';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (res.status === 204) return undefined as T;
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error ?? `${res.status} ${res.statusText}`);
-  return data as T;
+  const end = beginRequest();
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (res.status === 204) return undefined as T;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error ?? `${res.status} ${res.statusText}`);
+    return data as T;
+  } finally {
+    end();
+  }
 }
 
 const q = (slot: number, file: string) => `slot=${slot}&file=${encodeURIComponent(file)}`;

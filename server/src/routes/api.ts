@@ -9,7 +9,7 @@ import type { CredentialStore } from '../devices/credentials.js';
 import type { TimelineStore } from '../devices/timelines.js';
 import { ffmpegPaths, spawnLive } from '../media/ffmpeg.js';
 import type { FtpBridge } from '../media/ftpBridge.js';
-import type { MediaLocator } from '../media/locator.js';
+import { normaliseShareUrl, type MediaLocator } from '../media/locator.js';
 import type { ClipRef, MediaService } from '../media/service.js';
 
 interface Ctx {
@@ -220,6 +220,7 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
   app.post<IdParams>('/api/devices/:id/nas/select', async (req) => {
     const b = (req.body ?? {}) as { url: string | null };
     await devices.selectNas(req.params.id, b.url ?? null);
+    if (b.url) ensureShareForNasUrl(req.params.id, b.url);
     return { url: await devices.nasSelected(req.params.id) };
   });
   app.get<IdParams>('/api/devices/:id/nas/discovered', async (req) => devices.nasDiscover(req.params.id));
@@ -265,6 +266,28 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
       return { root: c.path ?? '', username: c.username, password: c.password };
     }
     throw new ValidationError('Unknown network drive source');
+  }
+
+  /**
+   * Selecting a NAS bookmark on the deck (above) is a DIFFERENT thing from this server having a
+   * share mapping that can actually read that location's bytes — the deck's own credentials for
+   * its NAS bookmark aren't necessarily anything this server can use, and clip playback/thumbnails
+   * go through this server's share mappings, not the deck's bookmark. Without a matching share,
+   * opening a clip that's genuinely on the newly-selected NAS fails with "Could not find ...".
+   * If a saved NAS credential's path is the same location as the bookmark just selected, wire up
+   * a share mapping from it automatically — the same login the user already verified with Test
+   * on that credential — rather than making them re-enter it a third time as a device share.
+   * Does nothing if a matching share already exists, or if no saved credential's path matches.
+   */
+  function ensureShareForNasUrl(deviceId: string, url: string) {
+    const d = devices.get(deviceId);
+    const norm = normaliseShareUrl(url);
+    if (d.shares.some((s) => normaliseShareUrl(s.url) === norm || normaliseShareUrl(s.localPath) === norm)) return;
+    const cred = ctx.credentials.list().find((c) => c.path?.trim() && normaliseShareUrl(c.path) === norm);
+    if (!cred) return;
+    devices.update(deviceId, {
+      shares: [...d.shares, { label: `${cred.label} (auto)`, url, localPath: cred.path!, username: cred.username, password: cred.password }],
+    } as Parameters<DeviceManager['update']>[1]);
   }
 
   app.post<IdParams>('/api/devices/:id/network-drives/browse', async (req) => {

@@ -16,6 +16,21 @@
 }
 
 * { box-sizing: border-box; }
+
+/* -------------------------------------------------------------- top progress bar */
+.top-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 1000; overflow: hidden; background: transparent; pointer-events: none; }
+.top-progress-bar {
+  position: absolute; top: 0; left: 0; height: 100%; width: 40%; border-radius: 0 2px 2px 0;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--accent), transparent);
+  animation: top-progress-sweep 1.1s ease-in-out infinite;
+}
+@keyframes top-progress-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .top-progress-bar { animation: none; left: 0; width: 100%; opacity: 0.6; }
+}
 html, body, #root { height: 100%; margin: 0; }
 body {
   background: var(--bg);
@@ -447,6 +462,10 @@ button.nd-entry:hover { background: var(--panel-2); }
   border-top: 1px solid rgba(0,0,0,.4);
 }
 .nle-clip.slice .nle-audio { background: repeating-linear-gradient(90deg, rgba(126, 226, 173, .3) 0 2px, transparent 2px 5px), #25352f; }
+.nle-strip-progress {
+  position: absolute; left: 0; right: 0; bottom: 22px; height: 3px; background: rgba(0,0,0,.35); pointer-events: none; overflow: hidden;
+}
+.nle-strip-progress > div { height: 100%; background: var(--accent); transition: width .3s ease; }
 .nle-playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: var(--warn); pointer-events: none; z-index: 5; will-change: transform; }
 .nle-playhead-cap {
   position: absolute; top: 0; left: -6px; width: 13px; height: 16px; background: var(--warn);

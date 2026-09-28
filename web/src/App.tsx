@@ -3,6 +3,7 @@ import { DeviceForm } from './components/DeviceForm';
 import { DeviceList } from './components/DeviceList';
 import { DeviceView } from './components/DeviceView';
 import { SettingsPage } from './components/SettingsPage';
+import { TopProgressBar } from './components/TopProgressBar';
 import { api } from './lib/api';
 import { DEMO_BANNER, useDevices, useServerConnected } from './lib/store';
 import type { Device } from './lib/types';
@@ -44,6 +45,7 @@ export function App() {
 
   return (
     <div className="app">
+      <TopProgressBar />
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark" aria-hidden>▣</span>

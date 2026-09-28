@@ -439,6 +439,7 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
                   >
                     <ClipThumbs entry={e} left={starts[i] * scale} width={w} scale={scale} fps={fps} view={view}
                       strip={strips[e.file] ?? null} frameUrl={(f) => api.frameUrl(device.id, t.slotId!, e.file, f, 180)} />
+                    <StripProgress strip={strips[e.file] ?? null} />
                     {w >= 40 && (
                       <span className="nle-label" style={{ transform: `translateX(${labelOffset(starts[i] * scale, w, view.left)}px)` }}>
                         <span className="tl-name">{isSlice(e) ? '✂ ' : ''}{e.file}</span>
@@ -497,6 +498,23 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
 /** Keep a clip's name visible at the left edge of the view while its start is scrolled off (like an NLE). */
 function labelOffset(clipLeft: number, clipWidth: number, viewLeft: number) {
   return Math.max(0, Math.min(viewLeft - clipLeft, clipWidth - 160));
+}
+
+/**
+ * Thin progress bar along the bottom of a clip while its filmstrip is still
+ * being generated server-side, so a clip that's slow to fill in (a big file,
+ * a busy server) reads as "in progress" instead of looking stuck or broken.
+ * Disappears once the strip is done; renders nothing if generation hasn't
+ * started yet (the head/tail fallback frames in ClipThumbs cover that case).
+ */
+function StripProgress({ strip }: { strip: StripStatus | null }) {
+  if (!strip || strip.done || strip.ready.length === 0) return null;
+  const pct = (strip.ready.filter(Boolean).length / strip.ready.length) * 100;
+  return (
+    <div className="nle-strip-progress" aria-hidden>
+      <div style={{ width: `${pct}%` }} />
+    </div>
+  );
 }
 
 /**
