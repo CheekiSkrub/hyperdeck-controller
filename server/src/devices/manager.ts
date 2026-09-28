@@ -1,6 +1,10 @@
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
+import net from 'node:net';
+import os from 'node:os';
 import { HyperDeckClient, HyperDeckError, type HyperDeckState } from '../hyperdeck/client.js';
+import { HyperDeckRest } from '../hyperdeck/rest.js';
+import { deviceAction, readSettings, SettingError, writeSetting } from './settings.js';
 import { fpsFromVideoFormat, timecodeToFrames, type TransportInfo } from '../hyperdeck/protocol.js';
 import { applyEdit, EditError, validateEdit, type DerivedEntry } from './edit.js';
 import type { Device, DeviceInput, DeviceStore } from './store.js';
@@ -45,6 +49,7 @@ export class CommandError extends Error {
 
 export class DeviceManager extends EventEmitter {
   private clients = new Map<string, HyperDeckClient>();
+  private rests = new Map<string, HyperDeckRest>();
 
   constructor(private readonly store: DeviceStore) {
     super();
@@ -77,6 +82,7 @@ export class DeviceManager extends EventEmitter {
   update(id: string, input: DeviceInput): Device {
     const d = this.store.update(id, input);
     this.client(id).setAddress(d.host, d.port);
+    this.rests.get(id)?.setAddress(d.host, d.restPort);
     this.emit('devices');
     this.emit('deviceChanged', id);
     return d;
@@ -85,6 +91,7 @@ export class DeviceManager extends EventEmitter {
   remove(id: string): void {
     this.clients.get(id)?.close();
     this.clients.delete(id);
+    this.rests.delete(id);
     this.store.remove(id);
     this.emit('devices');
   }
@@ -98,6 +105,7 @@ export class DeviceManager extends EventEmitter {
     c.on('state', (state: HyperDeckState) => this.emit('state', d.id, state));
     c.on('transport', (t: TransportInfo | null) => this.emit('transport', d.id, t));
     this.clients.set(d.id, c);
+    this.rests.set(d.id, new HyperDeckRest(d.host, d.restPort));
     c.connect();
   }
 
@@ -143,6 +151,64 @@ export class DeviceManager extends EventEmitter {
       }
     }
     return out;
+  }
+
+  // ---------------------------------------------------------------- deck setup menu
+
+  async settings(id: string) {
+    const c = this.client(id);
+    if (c.state.status !== 'connected') throw new CommandError('HyperDeck not connected', 409);
+    return readSettings(c, this.rests.get(id)!);
+  }
+
+  async setSetting(id: string, settingId: string, value: unknown) {
+    try {
+      await writeSetting(this.client(id), this.rests.get(id)!, settingId, value);
+    } catch (e) {
+      if (e instanceof SettingError) throw new CommandError(e.message, 400);
+      throw toCommandError(e);
+    }
+    return this.settings(id);
+  }
+
+  async action(id: string, action: string, body: Record<string, unknown>) {
+    try {
+      return await deviceAction(this.client(id), this.rests.get(id)!, action, body);
+    } catch (e) {
+      if (e instanceof SettingError) throw new CommandError(e.message, 400);
+      throw toCommandError(e);
+    }
+  }
+
+  /**
+   * Before changing a device's IP in the panel: can this server reach a
+   * HyperDeck there, and is the address on one of this server's networks?
+   */
+  async probe(host: string, port = 9993): Promise<{ reachable: boolean; model?: string; error?: string; sameSubnet: boolean; serverAddresses: string[] }> {
+    const serverAddresses: string[] = [];
+    let sameSubnet = false;
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const i of list ?? []) {
+        if (i.internal || i.family !== 'IPv4') continue;
+        serverAddresses.push(i.cidr ?? i.address);
+        if (net.isIPv4(host) && inSubnet(host, i.address, i.netmask)) sameSubnet = true;
+      }
+    }
+    if (!net.isIPv4(host) || host.startsWith('127.')) sameSubnet = true; // hostnames/loopback: don't warn on that basis
+    const result = await new Promise<{ reachable: boolean; model?: string; error?: string }>((resolve) => {
+      const sock = net.createConnection({ host, port });
+      let buf = '';
+      const done = (r: { reachable: boolean; model?: string; error?: string }) => { sock.destroy(); resolve(r); };
+      sock.setTimeout(2500, () => done({ reachable: false, error: 'No answer within 2.5 s' }));
+      sock.on('error', (e) => done({ reachable: false, error: e.message }));
+      sock.on('data', (d) => {
+        buf += d.toString();
+        const m = /model:\s*(.+)/.exec(buf);
+        if (/^500 connection info:/m.test(buf) && (m || buf.includes('\r\n\r\n'))) done({ reachable: true, model: m?.[1].trim() });
+      });
+      sock.on('connect', () => sock.setTimeout(2500));
+    });
+    return { ...result, sameSubnet, serverAddresses };
   }
 
   /** Replace the deck's timeline with an edit list (drag/drop, remove, split, reorder). */
@@ -208,6 +274,11 @@ export class DeviceManager extends EventEmitter {
       throw toCommandError(e);
     }
   }
+}
+
+function inSubnet(ip: string, addr: string, mask: string) {
+  const n = (x: string) => x.split('.').reduce((a, o) => (a << 8) + Number(o), 0) >>> 0;
+  return (n(ip) & n(mask)) >>> 0 === (n(addr) & n(mask)) >>> 0;
 }
 
 function stripExt(n: string) {

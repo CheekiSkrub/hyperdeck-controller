@@ -107,6 +107,24 @@ function transportLines(): string[] {
   ];
 }
 
+// Setup menu state (Ethernet "configuration" + REST).
+const config: Record<string, string> = {
+  'audio input': 'embedded', 'video input': 'SDI', 'file format': 'QuickTimeProResHQ', 'audio codec': 'PCM',
+  'timecode input': 'external', 'timecode output': 'clip', 'timecode preference': 'default', 'timecode preset': '00:00:00:00',
+  'audio input channels': '8', 'record trigger': 'none', 'record prefix': 'Studio Cam A', 'append timestamp': 'false',
+  'genlock input resync': 'false', 'reference source': 'auto', 'record cache': 'false', 'default standard': '1080p25',
+};
+const misc: Record<string, string> = { 'stop mode': 'lastframe', startup: 'false', 'startup single': 'false', 'playback override': 'off', 'record override': 'off' };
+const rest = {
+  codec: { codec: 'ProRes:HQ', container: 'QuickTime' },
+  codecs: ['ProRes:HQ', 'ProRes:422', 'ProRes:LT', 'ProRes:Proxy', 'DNxHD:220x', 'H.264:High', 'H.265:High'].map((c) => ({ codec: c, container: c.startsWith('H.') ? 'MP4' : 'QuickTime' })),
+  videoFormat: { name: '1080p25', frameRate: '25', height: 1080, width: 1920, interlaced: false },
+  videoFormats: ['1080p25', '1080p50', '1080i50', '1080p2997', '2160p25'].map((n) => ({ name: n, frameRate: n.replace(/^\d+[pi]/, ''), height: n.startsWith('2160') ? 2160 : 1080, width: n.startsWith('2160') ? 3840 : 1920, interlaced: n.includes('i') })),
+  audio: { codec: 'PCM', numChannels: 8 },
+  input: 'SDI',
+  monitoring: { cleanFeed: false, displayLUT: false, zebra: false, focusAssist: false, frameGuide: false, falseColor: false } as Record<string, boolean>,
+};
+
 const clients = new Set<net.Socket>();
 const notifyOn = new WeakMap<net.Socket, Set<string>>();
 function notify(kind: string, code: number, title: string, lines: string[]) {
@@ -233,7 +251,33 @@ function handle(sock: net.Socket, line: string): string {
     case 'record': deck.status = 'record'; deck.speed = 0; pushTransport(); return ok;
     case 'preview': deck.status = params.enable === 'true' ? 'preview' : 'stopped'; pushTransport(); return ok;
     case 'shuttle': deck.status = 'shuttle'; deck.speed = Number(params.speed ?? 0); pushTransport(); return ok;
-    case 'playrange set': case 'playrange clear': case 'identify': case 'play option': return ok;
+    case 'playrange set': case 'playrange clear': case 'identify': return ok;
+    case 'configuration': {
+      if (Object.keys(params).length === 0) return block(211, 'configuration', Object.entries(config).map(([k, v]) => `${k}: ${v}`));
+      for (const [k, v] of Object.entries(params)) {
+        if (!(k in config)) return '101 unsupported parameter\r\n';
+        if (k === 'file format' && !/^(QuickTime|DNx|H\.26)/.test(v)) return '102 invalid value\r\n';
+        config[k] = v;
+      }
+      notify('configuration', 511, 'configuration', Object.entries(params).map(([k, v]) => `${k}: ${v}`));
+      return ok;
+    }
+    case 'play option':
+      if (params['stop mode']) { misc['stop mode'] = params['stop mode']; return ok; }
+      return block(219, 'play option', [`stop mode: ${misc['stop mode']}`]);
+    case 'play on startup':
+      if (params.enable) { misc.startup = params.enable; return ok; }
+      if (params['single clip']) { misc['startup single'] = params['single clip']; return ok; }
+      return block(213, 'play on startup', [`enable: ${misc.startup}`, `single clip: ${misc['startup single']}`]);
+    case 'dynamic range':
+      if (params['playback override']) { misc['playback override'] = params['playback override']; return ok; }
+      if (params['record override']) { misc['record override'] = params['record override']; return ok; }
+      return block(215, 'dynamic range', [`playback override: ${misc['playback override']}`, `record override: ${misc['record override']}`]);
+    case 'format':
+      if (params.prepare) return block(216, 'format ready', ['token: mock-token-123']);
+      if (params.confirm === 'mock-token-123') return ok;
+      return '161 invalid token\r\n';
+    case 'reboot': return ok;
     case 'jog': {
       const m = /^([+-])?(\d{2}):(\d{2}):(\d{2}):(\d{2})$/.exec(params.timecode ?? '');
       if (!m) return '102 invalid value\r\n';
@@ -294,6 +338,32 @@ async function main() {
     sock.on('close', () => clients.delete(sock));
     sock.on('error', () => clients.delete(sock));
   }).listen(PORT, HOST, () => console.log(`[mock] HyperDeck protocol on ${HOST}:${PORT}`));
+
+  // Minimal REST API (real decks serve this on port 80 at /control/api/v1).
+  const http = await import('node:http');
+  const REST_PORT = Number(process.env.MOCK_REST_PORT ?? 8081);
+  http.createServer((req, res) => {
+    const url = (req.url ?? '').replace(/^\/control\/api\/v1/, '');
+    let body = '';
+    req.on('data', (d) => (body += d));
+    req.on('end', () => {
+      const json = (code: number, v?: unknown) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(v === undefined ? '' : JSON.stringify(v)); };
+      const put = req.method === 'PUT' ? JSON.parse(body || '{}') : null;
+      const mon = /^\/monitoring\/([^/]+)\/(\w+)$/.exec(url);
+      if (url === '/system/product') return json(200, { deviceName: 'Mock Deck', productName: 'HyperDeck Studio HD Pro (Mock)', softwareVersion: '8.4' });
+      if (url === '/system/codecFormat') { if (put) { rest.codec = put; return json(204); } return json(200, rest.codec); }
+      if (url === '/system/supportedCodecFormats') return json(200, { codecs: rest.codecs });
+      if (url === '/system/videoFormat') { if (put) { rest.videoFormat = put; return json(204); } return json(200, rest.videoFormat); }
+      if (url === '/system/supportedVideoFormats') return json(200, { formats: rest.videoFormats });
+      if (url === '/audio/recordFormat') { if (put) { rest.audio = put; return json(204); } return json(200, rest.audio); }
+      if (url === '/audio/supportedRecordFormats') return json(200, { supportedRecordFormats: [2, 4, 8, 16].flatMap((n) => [{ format: { codec: 'PCM', numChannels: n }, available: true }, { format: { codec: 'AAC', numChannels: 2 }, available: n === 2 }]).filter((x, i, a) => a.findIndex((y) => JSON.stringify(y.format) === JSON.stringify(x.format)) === i) });
+      if (url === '/transports/0/inputVideoSource') { if (put) { rest.input = put.inputVideoSource; return json(204); } return json(200, { inputVideoSource: rest.input }); }
+      if (url === '/transports/0/supportedInputVideoSources') return json(200, { supportedInputVideoSources: ['SDI', 'HDMI'] });
+      if (url === '/monitoring/display') return json(200, { displays: ['LCD', 'SDI'] });
+      if (mon && mon[2] in rest.monitoring) { if (put) { rest.monitoring[mon[2]] = put.enabled; return json(204); } return json(200, { enabled: rest.monitoring[mon[2]] }); }
+      json(404, { error: 'not found' });
+    });
+  }).listen(REST_PORT, HOST, () => console.log(`[mock] REST API on ${HOST}:${REST_PORT}/control/api/v1`));
 
   const { FtpSrv } = await import('ftp-srv');
   const ftp = new FtpSrv({ url: `ftp://${HOST}:${FTP_PORT}`, anonymous: true, pasv_url: '127.0.0.1', pasv_min: 30000, pasv_max: 30100, log: { info() {}, debug() {}, trace() {}, warn() {}, error() {}, child() { return this; } } as any });

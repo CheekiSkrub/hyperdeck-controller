@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
-import type { Device, ShareMapping, SourcesTest } from '../lib/types';
+import type { AddressCheck, Device, ShareMapping, SourcesTest } from '../lib/types';
 import { Modal } from './Modal';
 
 const IP_OR_HOST = /^((\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?)$/;
@@ -14,6 +14,9 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
   const [name, setName] = useState(device?.name ?? '');
   const [host, setHost] = useState(device?.host ?? '');
   const [port, setPort] = useState(device?.port ?? 9993);
+  const [restPort, setRestPort] = useState(device?.restPort ?? 80);
+  /** Result of checking a new/changed address; shown as a warning before saving. */
+  const [probe, setProbe] = useState<{ host: string; result: AddressCheck } | null>(null);
   const [ftp, setFtp] = useState(device?.ftp ?? { enabled: true, port: 21, user: 'anonymous', password: '' });
   const [shares, setShares] = useState<ShareMapping[]>(device?.shares ?? []);
   const [advanced, setAdvanced] = useState(Boolean(device?.shares.length));
@@ -31,7 +34,16 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
     if (!hostValid) return setError('Enter a valid IP address');
     setBusy(true);
     try {
-      const body = { name: name.trim(), host: host.trim(), port, ftp, shares: shares.filter((s) => s.localPath.trim()) };
+      const addressChanged = !device || device.host !== host.trim() || device.port !== port;
+      const confirmed = probe?.host === `${host.trim()}:${port}`;
+      if (addressChanged && !confirmed) {
+        const result = await api.probe(host.trim(), port);
+        if (!result.reachable || !result.sameSubnet) {
+          setProbe({ host: `${host.trim()}:${port}`, result });
+          return; // show the warning; pressing Save again confirms
+        }
+      }
+      const body = { name: name.trim(), host: host.trim(), port, restPort, ftp, shares: shares.filter((s) => s.localPath.trim()) };
       const saved = device ? await api.updateDevice(device.id, body) : await api.createDevice(body);
       onSaved({ ...saved, state: device?.state ?? (saved as Device).state });
     } catch (err) {
@@ -68,8 +80,26 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
         </label>
         <label>
           <span>IP address</span>
-          <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="192.168.10.50" className={host && !hostValid ? 'invalid' : ''} inputMode="decimal" />
+          <input value={host} onChange={(e) => { setHost(e.target.value); setProbe(null); }} placeholder="192.168.10.50" className={host && !hostValid ? 'invalid' : ''} inputMode="decimal" />
         </label>
+
+        {probe && (
+          <div className="banner warn ip-warning" role="alert">
+            <div>
+              <strong>{probe.result.reachable ? 'Check this address' : `No HyperDeck answered at ${probe.host}`}</strong>
+              {!probe.result.reachable && <span className="muted"> ({probe.result.error})</span>}
+              {device && !probe.result.reachable && (
+                <p>If you save, the panel will lose contact with <strong>{device.name}</strong> until a deck answers at this address.
+                  It's currently reachable at {device.host}{device.state.status === 'connected' ? '' : ' (offline now)'}.</p>
+              )}
+              {!probe.result.sameSubnet && (
+                <p>{probe.host.split(':')[0]} isn't on any of this server's networks ({probe.result.serverAddresses.join(', ') || 'none found'}),
+                  so the server can only reach it through a router.</p>
+              )}
+              <p className="muted small">Press {device ? 'Save' : 'Add'} again to use it anyway.</p>
+            </div>
+          </div>
+        )}
 
         <button type="button" className="link" onClick={() => setAdvanced(!advanced)}>
           {advanced ? '▾' : '▸'} Media access &amp; advanced
@@ -77,10 +107,16 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
 
         {advanced && (
           <div className="advanced">
-            <label className="inline">
-              <span>Control port</span>
-              <input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} />
-            </label>
+            <div className="row3">
+              <label>
+                <span>Control port (Ethernet protocol)</span>
+                <input type="number" value={port} onChange={(e) => { setPort(Number(e.target.value)); setProbe(null); }} />
+              </label>
+              <label>
+                <span>REST API port</span>
+                <input type="number" value={restPort} onChange={(e) => setRestPort(Number(e.target.value))} />
+              </label>
+            </div>
 
             <fieldset>
               <legend>HyperDeck FTP (internal media, SD/SSD/USB)</legend>
@@ -142,7 +178,9 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
           )}
           <span className="spacer" />
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn primary" disabled={busy}>{device ? 'Save' : 'Add'}</button>
+          <button type="submit" className="btn primary" disabled={busy}>
+            {busy ? 'Checking…' : probe ? `${device ? 'Save' : 'Add'} anyway` : device ? 'Save' : 'Add'}
+          </button>
         </div>
       </form>
     </Modal>

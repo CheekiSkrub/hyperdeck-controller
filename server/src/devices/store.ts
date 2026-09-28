@@ -32,6 +32,8 @@ export interface Device {
   host: string;
   /** Ethernet protocol port (9993). */
   port: number;
+  /** REST API port (80) — used for codec lists, audio format, monitoring. */
+  restPort: number;
   ftp: FtpSettings;
   shares: ShareMapping[];
   createdAt: string;
@@ -64,7 +66,7 @@ export class DeviceStore {
     this.file = path.join(dataDir, 'devices.json');
     fs.mkdirSync(dataDir, { recursive: true });
     try {
-      this.devices = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      this.devices = (JSON.parse(fs.readFileSync(this.file, 'utf8')) as Device[]).map((d) => ({ ...d, restPort: d.restPort ?? 80 }));
     } catch {
       this.devices = [];
     }
@@ -87,6 +89,7 @@ export class DeviceStore {
       name,
       host,
       port: validPort(input.port, 9993),
+      restPort: validPort(input.restPort, 80),
       ftp: this.normaliseFtp(input.ftp),
       shares: this.normaliseShares(input.shares),
       createdAt: new Date().toISOString(),
@@ -105,6 +108,7 @@ export class DeviceStore {
     }
     if (input.host !== undefined) d.host = validateHost(input.host);
     if (input.port !== undefined) d.port = validPort(input.port, 9993);
+    if (input.restPort !== undefined) d.restPort = validPort(input.restPort, 80);
     if (input.ftp !== undefined) d.ftp = this.normaliseFtp({ ...d.ftp, ...input.ftp });
     if (input.shares !== undefined) d.shares = this.normaliseShares(input.shares);
     this.save();

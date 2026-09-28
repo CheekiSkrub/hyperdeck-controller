@@ -5,6 +5,7 @@ import { fpsFromFormat, framesToTc } from '../lib/tc';
 import type { ClipListing, Device, EditEntry } from '../lib/types';
 import { ClipBrowser } from './ClipBrowser';
 import { ClipViewer } from './ClipViewer';
+import { SettingsPanel } from './SettingsPanel';
 import { Slots } from './Slots';
 import { EditTimeline } from './EditTimeline';
 import { Transport } from './Transport';
@@ -12,6 +13,7 @@ import { Transport } from './Transport';
 export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => void }) {
   const s = device.state;
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
+  const [tab, setTab] = useState<'control' | 'settings'>('control');
   const [viewing, setViewing] = useState<{ clip: ClipListing; startFrame?: number; editIndex?: number } | null>(null);
 
   const notify = useCallback((text: string, kind: 'ok' | 'err' = 'err') => {
@@ -92,7 +94,14 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
         </div>
       )}
 
-      {connected && s.transport && (
+      <div className="seg tabs" role="tablist" aria-label="View">
+        <button role="tab" aria-selected={tab === 'control'} className={tab === 'control' ? 'on' : ''} onClick={() => setTab('control')}>Control</button>
+        <button role="tab" aria-selected={tab === 'settings'} className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>Deck settings</button>
+      </div>
+
+      {tab === 'settings' && <SettingsPanel device={device} notify={notify} />}
+
+      {tab === 'control' && connected && s.transport && (
         <>
           <Transport device={device} send={send} />
           <EditTimeline device={device} editor={editor} send={send} notify={notify} onOpen={openEntry} />
@@ -100,7 +109,7 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
         </>
       )}
 
-      <ClipBrowser device={device} onOpen={(clip) => setViewing({ clip })} notify={notify} />
+      {tab === 'control' && <ClipBrowser device={device} onOpen={(clip) => setViewing({ clip })} notify={notify} />}
 
       {viewing && (
         <ClipViewer

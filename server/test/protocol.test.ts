@@ -79,3 +79,20 @@ test('filmstrip bisection order covers every tile once, coarse first', () => {
 test('share URL normalisation matches smb and UNC forms', () => {
   assert.equal(normaliseShareUrl('smb://NAS.local/Recordings/'), normaliseShareUrl('\\\\nas.local\\recordings'));
 });
+
+import { editFromState } from '../src/devices/edit.js';
+
+test('edit list derived from clips get v2/v3 (in/out as clip timecodes)', () => {
+  const state = {
+    transport: { videoFormat: '1080p25', slotId: 1 },
+    disks: { 1: [{ index: 1, name: 'A.mov', fileFormat: '', videoFormat: '1080p25', duration: '00:00:20:00' }] },
+    timeline: [
+      { id: 1, name: 'A.mov', startTimecode: '10:00:00:00', duration: '00:00:20:00', inTimecode: '10:00:00:00', outTimecode: '10:00:20:00' },
+      { id: 2, name: 'A.mov', startTimecode: '10:00:00:00', duration: '00:00:20:00', inTimecode: '10:00:05:00', outTimecode: '10:00:08:00' },
+    ],
+  } as any;
+  assert.deepEqual(editFromState(state), [
+    { file: 'A.mov', in: 0, out: 500, frames: 500 },
+    { file: 'A.mov', in: 125, out: 200, frames: 500 },
+  ]);
+});

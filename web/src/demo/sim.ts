@@ -49,7 +49,7 @@ const newId = () => `demo-${++idSeq}-${Math.random().toString(36).slice(2, 7)}`;
 
 function makeSim(name: string, host: string, online: boolean, slots: SimSlot[], shares: ShareMapping[] = []): Sim {
   const device: Device = {
-    id: newId(), name, host, port: 9993, ftp: defaultFtp(), shares, createdAt: new Date().toISOString(),
+    id: newId(), name, host, port: 9993, restPort: 80, ftp: defaultFtp(), shares, createdAt: new Date().toISOString(),
     state: undefined as unknown as DeviceState,
   };
   const sim: Sim = {
@@ -209,6 +209,7 @@ export function updateDevice(id: string, input: Partial<Device>): Device {
   if (input.name !== undefined) s.device.name = input.name.trim();
   if (input.host !== undefined) s.device.host = input.host.trim();
   if (input.port !== undefined) s.device.port = input.port;
+  if (input.restPort !== undefined) s.device.restPort = input.restPort;
   if (input.ftp) s.device.ftp = input.ftp;
   if (input.shares) s.device.shares = input.shares.map((x) => ({ ...x, id: x.id ?? newId() }));
   rebuild();
@@ -453,4 +454,55 @@ function draw(look: Look, w: number, h: number, t: number, u: number) {
       break;
     }
   }
+}
+
+// ------------------------------------------------------------------ setup menu (demo)
+
+import type { DeckSetting } from '../lib/types';
+
+const o = (...v: string[]) => v.map((x) => ({ value: x, label: x }));
+const menus = new Map<string, DeckSetting[]>();
+export function settingsFor(id: string): DeckSetting[] {
+  const s = find(id);
+  if (!s.online) throw new DeckError('HyperDeck not connected');
+  let m = menus.get(id);
+  if (!m) {
+    m = [
+      { id: 'rest:codecFormat', group: 'Record', label: 'Codec', type: 'select', value: 'ProRes HQ', options: o('ProRes HQ', 'ProRes 422', 'ProRes LT', 'ProRes Proxy', 'DNxHD 220x', 'DNxHR HQX', 'H.264 High', 'H.265 High') },
+      { id: 'cfg:record trigger', group: 'Record', label: 'Record trigger', type: 'select', value: 'none', options: o('none', 'recordbit', 'timecoderun') },
+      { id: 'cfg:record prefix', group: 'Record', label: 'File name prefix', type: 'text', value: 'Studio A' },
+      { id: 'cfg:append timestamp', group: 'Record', label: 'Append timestamp to file name', type: 'bool', value: false },
+      { id: 'cfg:record cache', group: 'Record', label: 'Record cache', type: 'bool', value: false },
+      { id: 'rest:videoFormat', group: 'Video', label: 'Video format', type: 'select', value: '1080p25', options: o('1080p25', '1080p50', '1080i50', '2160p25', '2160p50'), help: 'Recording follows the input when one is connected.' },
+      { id: 'rest:inputVideoSource', group: 'Video', label: 'Video input', type: 'select', value: 'SDI', options: o('SDI', 'HDMI') },
+      { id: 'cfg:reference source', group: 'Video', label: 'Reference source', type: 'select', value: 'auto', options: o('auto', 'input', 'external') },
+      { id: 'dr:record override', group: 'Video', label: 'HDR record override', type: 'select', value: 'off', options: o('off', 'Rec709', 'Rec2020_SDR', 'HLG', 'ST2084_1000') },
+      { id: 'cfg:audio input', group: 'Audio', label: 'Audio input', type: 'select', value: 'embedded', options: o('embedded', 'XLR', 'RCA') },
+      { id: 'rest:audioFormat', group: 'Audio', label: 'Audio record format', type: 'select', value: 'PCM · 8 ch', options: o('PCM · 2 ch', 'PCM · 4 ch', 'PCM · 8 ch', 'PCM · 16 ch', 'AAC · 2 ch') },
+      { id: 'cfg:timecode input', group: 'Timecode', label: 'Timecode input', type: 'select', value: 'external', options: o('external', 'embedded', 'internal', 'preset', 'clip') },
+      { id: 'cfg:timecode output', group: 'Timecode', label: 'Timecode output', type: 'select', value: 'clip', options: o('clip', 'timeline') },
+      { id: 'cfg:timecode preset', group: 'Timecode', label: 'Timecode preset', type: 'timecode', value: '10:00:00:00' },
+      { id: 'play:stop mode', group: 'Playback', label: 'Stop mode', type: 'select', value: 'lastframe', options: o('lastframe', 'nextframe', 'black') },
+      { id: 'startup:enable', group: 'Playback', label: 'Play on startup', type: 'bool', value: false },
+      { id: 'remote:enable', group: 'System', label: 'Remote control enabled', type: 'bool', value: true },
+      { id: 'info:product', group: 'System', label: 'Model', type: 'info', value: 'HyperDeck Studio 4K Pro', readOnly: true },
+      { id: 'info:software', group: 'System', label: 'Software version', type: 'info', value: '8.4', readOnly: true },
+      { id: 'mon:SDI:cleanFeed', group: 'Monitoring · SDI', label: 'Clean feed', type: 'bool', value: false },
+      { id: 'mon:SDI:zebra', group: 'Monitoring · SDI', label: 'Zebra', type: 'bool', value: false },
+      { id: 'mon:SDI:frameGuide', group: 'Monitoring · SDI', label: 'Frame guides', type: 'bool', value: false },
+    ];
+    menus.set(id, m);
+  }
+  const remote = m.find((x) => x.id === 'remote:enable');
+  if (remote) remote.value = s.remote;
+  return m;
+}
+
+export function setSetting(id: string, settingId: string, value: unknown) {
+  const m = settingsFor(id);
+  const item = m.find((x) => x.id === settingId);
+  if (!item || item.readOnly) throw new DeckError('This setting is read-only');
+  item.value = value as DeckSetting['value'];
+  if (settingId === 'remote:enable') { find(id).remote = value === true; rebuild(); }
+  return m;
 }

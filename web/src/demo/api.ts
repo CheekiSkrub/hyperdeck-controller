@@ -28,6 +28,19 @@ export const api = {
   }, 400),
 
   command: (id: string, command: string, params?: Record<string, string | number | boolean>) => later(() => sim.command(id, command, params), 30),
+  settings: (id: string) => later(() => ({ rest: true, settings: sim.settingsFor(id).map((x) => ({ ...x })), errors: [] }), 300),
+  setSetting: (id: string, settingId: string, value: unknown) =>
+    later(() => ({ rest: true, settings: sim.setSetting(id, settingId, value).map((x) => ({ ...x })), errors: [] }), 150),
+  action: (_id: string, action: string, _body?: Record<string, unknown>) =>
+    later(() => {
+      if (action === 'format') throw new Error('Formatting is disabled in the demo');
+      return { ok: true };
+    }, 300),
+  probe: (host: string, _port?: number) => later(() => {
+    const known = sim.devices().some((d) => d.host === host && d.state.status === 'connected');
+    const sameSubnet = /^192\.168\.10\./.test(host);
+    return { reachable: known, error: known ? undefined : 'No answer within 2.5 s (simulated)', sameSubnet, serverAddresses: ['192.168.10.5/24'] };
+  }, 500),
   setEdit: (id: string, entries: EditEntry[]) => later(() => sim.setEdit(id, entries), 120),
   originalUrl: (_id: string, _slot: number, _file: string): string | null => null,
   liveUrl: (_id: string, _slot: number, _file: string, _seconds: number): string | null => null,

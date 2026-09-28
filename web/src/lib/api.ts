@@ -1,4 +1,4 @@
-import type { ClipListing, Device, EditEntry, MediaInfo, ProxyStatus, SourcesTest, StripStatus, TransportInfo } from './types';
+import type { AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SourcesTest, StripStatus, TransportInfo } from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -14,7 +14,7 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
 
 const q = (slot: number, file: string) => `slot=${slot}&file=${encodeURIComponent(file)}`;
 
-export type DeviceInput = Partial<Pick<Device, 'name' | 'host' | 'port' | 'ftp' | 'shares'>>;
+export type DeviceInput = Partial<Pick<Device, 'name' | 'host' | 'port' | 'restPort' | 'ftp' | 'shares'>>;
 
 export const api = {
   info: () => req<{ version: string; platform: string; ffmpeg: { ok: boolean; ffmpeg: string } }>('GET', '/api/info'),
@@ -26,6 +26,10 @@ export const api = {
 
   command: (id: string, command: string, params?: Record<string, string | number | boolean>) =>
     req<{ code: number; text: string }>('POST', `/api/devices/${id}/command`, { command, params }),
+  settings: (id: string) => req<DeckSettings>('GET', `/api/devices/${id}/settings`),
+  setSetting: (id: string, settingId: string, value: unknown) => req<DeckSettings>('POST', `/api/devices/${id}/settings`, { id: settingId, value }),
+  action: (id: string, action: string, body?: Record<string, unknown>) => req<{ ok: boolean }>('POST', `/api/devices/${id}/actions/${action}`, body ?? {}),
+  probe: (host: string, port?: number) => req<AddressCheck>('POST', '/api/probe', { host, port }),
   setEdit: (id: string, entries: EditEntry[]) => req<EditEntry[]>('PUT', `/api/devices/${id}/edit`, { entries }),
   originalUrl: (id: string, slot: number, file: string): string | null => `/api/devices/${id}/media/original?${q(slot, file)}`,
   liveUrl: (id: string, slot: number, file: string, seconds: number): string | null =>

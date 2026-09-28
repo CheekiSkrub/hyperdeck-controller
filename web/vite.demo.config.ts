@@ -12,6 +12,8 @@ export default defineConfig({
   esbuild: { jsxInject: `import React from 'react'` },
   resolve: {
     alias: [
+      { find: /^\.\/api$/, replacement: path.resolve(__dirname, 'src/demo/api.ts') },
+      { find: /^\.\/store$/, replacement: path.resolve(__dirname, 'src/demo/store.ts') },
       { find: /^(\.\.?\/)+lib\/api$/, replacement: path.resolve(__dirname, 'src/demo/api.ts') },
       { find: /^(\.\.?\/)+lib\/store$/, replacement: path.resolve(__dirname, 'src/demo/store.ts') },
     ],

@@ -76,6 +76,7 @@ export interface Device {
   name: string;
   host: string;
   port: number;
+  restPort: number;
   ftp: { enabled: boolean; port: number; user: string; password: string };
   shares: ShareMapping[];
   createdAt: string;
@@ -138,4 +139,29 @@ export interface SourcesTest {
   ftp: { ok: boolean; message: string; mediaFiles?: number; folders?: string[] };
   shares: { id: string; label: string; ok: boolean; message: string }[];
   nasUrl: string | null;
+}
+
+export interface DeckSetting {
+  id: string;
+  group: string;
+  label: string;
+  type: 'select' | 'bool' | 'text' | 'number' | 'timecode' | 'info';
+  value: string | number | boolean | null;
+  options?: { value: string; label: string }[];
+  help?: string;
+  readOnly?: boolean;
+}
+
+export interface DeckSettings {
+  rest: boolean;
+  settings: DeckSetting[];
+  errors: string[];
+}
+
+export interface AddressCheck {
+  reachable: boolean;
+  model?: string;
+  error?: string;
+  sameSubnet: boolean;
+  serverAddresses: string[];
 }

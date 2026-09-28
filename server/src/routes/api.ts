@@ -82,6 +82,20 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     return devices.command(req.params.id, command, params);
   });
 
+  app.get<IdParams>('/api/devices/:id/settings', async (req) => devices.settings(req.params.id));
+  app.post<IdParams>('/api/devices/:id/settings', async (req) => {
+    const b = req.body as { id: string; value: unknown };
+    if (typeof b?.id !== 'string') throw new ValidationError('id is required');
+    return devices.setSetting(req.params.id, b.id, b.value);
+  });
+  app.post<{ Params: { id: string; action: string } }>('/api/devices/:id/actions/:action', async (req) =>
+    devices.action(req.params.id, req.params.action, (req.body ?? {}) as Record<string, unknown>));
+  app.post('/api/probe', async (req) => {
+    const b = req.body as { host: string; port?: number };
+    if (!b?.host) throw new ValidationError('host is required');
+    return devices.probe(String(b.host).trim(), Number(b.port) || 9993);
+  });
+
   app.put<IdParams>('/api/devices/:id/edit', async (req) => {
     return devices.setEdit(req.params.id, (req.body as { entries: unknown }).entries);
   });
