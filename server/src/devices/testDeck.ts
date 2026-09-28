@@ -47,6 +47,14 @@ export class TestDeckManager {
           ffprobe: ff.ffprobe,
         });
         this.mocks.set(d.id, mock);
+        // Test devices created before the simulated NAS share was auto-added (or whose cache dir
+        // moved) won't have a working share mapping for their NAS slot — fix that up here so an
+        // older persisted test device doesn't sit there failing to preview its NAS clip forever.
+        if (!d.shares.some((sh) => sh.localPath === mock.nasDir)) {
+          this.devices.update(d.id, {
+            shares: [...d.shares.filter((sh) => sh.label !== 'Simulated NAS'), { label: 'Simulated NAS', localPath: mock.nasDir }],
+          } as Parameters<DeviceManager['update']>[1]);
+        }
       } catch (e) {
         console.warn(`[testdeck] couldn't restart simulated deck "${d.name}": ${(e as Error).message}`);
       }
