@@ -1,4 +1,4 @@
-import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost, AppSettings, NasCredential, NetworkDriveSource, NetworkDriveEntry} from './types';
+import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost, AppSettings, NasCredential, NetworkDriveSource, NetworkDriveEntry, ShareSpace} from './types';
 import { beginRequest } from './busy';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -72,6 +72,7 @@ export const api = {
   removeNasBookmark: (id: string, url: string) => req<NasBookmark[]>('POST', `/api/devices/${id}/nas/bookmarks/remove`, { url }),
   nasSelected: (id: string) => req<{ url: string | null }>('GET', `/api/devices/${id}/nas/selected`),
   selectNas: (id: string, url: string | null) => req<{ url: string | null }>('POST', `/api/devices/${id}/nas/select`, { url }),
+  nasSpace: (id: string) => req<{ slotId: number | null; space: ShareSpace | null }>('GET', `/api/devices/${id}/nas/space`),
   nasDiscover: (id: string) => req<NasHost[]>('GET', `/api/devices/${id}/nas/discovered`),
 
   originalUrl: (id: string, slot: number, file: string): string | null => `/api/devices/${id}/media/original?${q(slot, file)}`,

@@ -41,6 +41,15 @@ export interface MockDeckOptions {
   /** Clip lengths in seconds for the three generated files (shorter = faster to spin up). Default 6/4/5. */
   clipSeconds?: { camA: number; interview: number; nas: number };
   verbose?: boolean;
+  /** NAS bookmarks/selection to start with (e.g. restored from a previous run). */
+  nas?: MockNasState;
+  /** Called whenever the simulated NAS bookmarks or selection change, so they can be persisted. */
+  onNasChange?: (nas: MockNasState) => void;
+}
+
+export interface MockNasState {
+  bookmarks: { url: string; username?: string; password?: string }[];
+  selected: string | null;
 }
 
 export interface MockDeck {
@@ -263,10 +272,13 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     // Simulated NAS bookmarks/selection, so the "Network storage (deck)" settings UI has something
     // real to exercise against a test HyperDeck instead of only failing with 404.
     nas: {
-      bookmarks: [] as { url: string; username?: string; password?: string }[],
-      selected: null as string | null,
-    },
+      bookmarks: [...(opts.nas?.bookmarks ?? [])],
+      selected: opts.nas?.selected ?? null,
+    } as MockNasState,
   };
+  const nasChanged = () => opts.onNasChange?.({ bookmarks: rest.nas.bookmarks.map((b) => ({ ...b })), selected: rest.nas.selected });
+  // A restored selection should point slot 3 back at that share straight away.
+  if (rest.nas.selected) void refreshSlot3ForSelection();
 
   // The NAS slot's reported "volume name" should track whichever bookmark is
   // currently selected (matches how a real deck names the mounted share), not a
@@ -536,6 +548,7 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
         const b = parsedBody as { url?: string; username?: string; password?: string };
         if (!b?.url) return json(400, { error: 'url is required' });
         if (!rest.nas.bookmarks.some((x) => x.url === b.url)) rest.nas.bookmarks.push({ url: b.url, username: b.username, password: b.password });
+        nasChanged();
         return json(204);
       }
       if (nasBookmarkMatch && req.method === 'PUT') {
@@ -546,12 +559,14 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
         if (b?.username !== undefined) bm.username = b.username;
         if (b?.password !== undefined) bm.password = b.password;
         if (rest.nas.selected === target) void refreshSlot3ForSelection(); // credentials for the active bookmark changed
+        nasChanged();
         return json(204);
       }
       if (nasBookmarkMatch && req.method === 'DELETE') {
         const target = decodeURIComponent(nasBookmarkMatch[1]);
         rest.nas.bookmarks = rest.nas.bookmarks.filter((x) => x.url !== target);
         if (rest.nas.selected === target) { rest.nas.selected = null; void refreshSlot3ForSelection(); }
+        nasChanged();
         return json(204);
       }
       if (url === '/media/nas/selected' && req.method === 'GET') return json(200, { selected: rest.nas.selected ? { url: rest.nas.selected } : null });
@@ -559,6 +574,7 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
         const b = parsedBody as { selected: { url: string } | null };
         rest.nas.selected = b?.selected?.url ?? null;
         void refreshSlot3ForSelection();
+        nasChanged();
         return json(204);
       }
       if (url === '/media/nas/discovered' && req.method === 'GET') {

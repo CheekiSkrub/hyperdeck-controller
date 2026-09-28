@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createMockDeck, type MockDeck } from '../testdeck/mockDeck.js';
+import { createMockDeck, type MockDeck, type MockNasState } from '../testdeck/mockDeck.js';
 import type { DeviceManager } from './manager.js';
 import type { Device, DeviceStore } from './store.js';
 
@@ -15,7 +15,9 @@ import type { Device, DeviceStore } from './store.js';
  *
  * Test devices are still listed in devices.json (so they survive a restart
  * along with their id and any UI state), but their mock server is not — it's
- * restarted on the same address/ports when the app starts back up.
+ * restarted on the same address/ports when the app starts back up. Its simulated NAS
+ * bookmarks and selection are saved beside its media (nas.json) so they come back too —
+ * otherwise every server restart (each tsx watch reload in dev) unmounted the NAS.
  */
 export class TestDeckManager {
   private mocks = new Map<string, MockDeck>();
@@ -45,6 +47,7 @@ export class TestDeckManager {
           mediaDir: this.mediaDir(d.id),
           ffmpeg: ff.ffmpeg,
           ffprobe: ff.ffprobe,
+          ...this.nasPersistence(d.id),
         });
         this.mocks.set(d.id, mock);
         // Test devices created before the simulated NAS share was auto-added (or whose cache dir
@@ -71,7 +74,10 @@ export class TestDeckManager {
       mediaDir: this.mediaDir(id),
       ffmpeg: ff.ffmpeg,
       ffprobe: ff.ffprobe,
+      // Saved under the final device id once it's known (see below).
+      onNasChange: (nas) => { if (deviceId) this.saveNas(deviceId, nas); },
     });
+    let deviceId: string | undefined;
     try {
       const device = this.devices.create({
         name: (name?.trim() || this.nextName()),
@@ -89,6 +95,7 @@ export class TestDeckManager {
         fs.mkdirSync(path.dirname(finalDir), { recursive: true });
         fs.renameSync(this.mediaDir(id), finalDir);
       }
+      deviceId = device.id;
       this.mocks.set(device.id, mock);
       return device;
     } catch (e) {
@@ -108,6 +115,27 @@ export class TestDeckManager {
 
   async shutdown(): Promise<void> {
     await Promise.all([...this.mocks.values()].map((m) => m.stop().catch(() => {})));
+  }
+
+  private nasPersistence(id: string): { nas?: MockNasState; onNasChange: (nas: MockNasState) => void } {
+    let nas: MockNasState | undefined;
+    try {
+      nas = JSON.parse(fs.readFileSync(this.nasFile(id), 'utf8')) as MockNasState;
+    } catch { /* none saved yet */ }
+    return { nas, onNasChange: (n) => this.saveNas(id, n) };
+  }
+
+  private saveNas(id: string, nas: MockNasState): void {
+    try {
+      fs.mkdirSync(this.mediaDir(id), { recursive: true });
+      fs.writeFileSync(this.nasFile(id), JSON.stringify(nas, null, 2));
+    } catch (e) {
+      console.warn(`[testdeck] couldn't save NAS state: ${(e as Error).message}`);
+    }
+  }
+
+  private nasFile(id: string): string {
+    return path.join(this.mediaDir(id), 'nas.json');
   }
 
   private mediaDir(id: string): string {

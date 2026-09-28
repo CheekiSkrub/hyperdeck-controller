@@ -30,6 +30,15 @@ interface IndexedFile {
 
 const MEDIA_EXT = /\.(mov|mp4|mxf|m4v)$/i;
 const INDEX_TTL = 20_000;
+const SPACE_TTL = 15_000;
+
+export interface ShareSpace {
+  shareId: string;
+  label: string;
+  path: string;
+  total: number;
+  free: number;
+}
 
 /**
  * Finds where a clip reported by the HyperDeck can actually be read from.
@@ -46,6 +55,9 @@ export class MediaLocator {
   private shareIndex = new Map<string, { at: number; files: Map<string, IndexedFile> }>();
   private connectedAt = new Map<string, number>();
   private connecting = new Map<string, Promise<{ ok: boolean; message: string }>>();
+  private spaceCache = new Map<string, { at: number; space: ShareSpace | null; error?: string }>();
+  /** Why the last networkSpace() lookup came back empty, for the API to report. */
+  lastSpaceError = new Map<string, string>();
 
   constructor(private readonly bridge: FtpBridge) {}
 
@@ -106,6 +118,42 @@ export class MediaLocator {
       const bm = nas && normaliseShareUrl(b.url) === nas ? 0 : 1;
       return am - bm;
     });
+  }
+
+  /**
+   * Free/total space of the share behind the deck's network slot, read by this server
+   * directly (statfs on the UNC path / mount point). The deck's own `slot info` sizes for
+   * NAS are unreliable (and the test deck's are made up), whereas the share mapping is
+   * the same storage the clips are read from. Uses the share matching the deck's selected
+   * NAS URL, or the device's only share if there is just one. Cached briefly; a share
+   * that's slow to answer times out rather than stalling the panel.
+   */
+  async networkSpace(device: Device, state: HyperDeckState): Promise<ShareSpace | null> {
+    const nas = normaliseShareUrl(state.nasUrl);
+    const share = (nas && device.shares.find((s) => normaliseShareUrl(s.url) === nas))
+      ?? (device.shares.length === 1 ? device.shares[0] : undefined);
+    if (!share) { this.lastSpaceError.set(device.id, 'No share mapping matches the selected NAS'); return null; }
+    const hit = this.spaceCache.get(share.localPath);
+    if (hit && Date.now() - hit.at < SPACE_TTL) { this.noteSpaceError(device.id, hit.error); return hit.space; }
+    let space: ShareSpace | null = null;
+    let error: string | undefined;
+    try {
+      await this.ensureConnected(share.localPath, share.username, share.password);
+      const st = await withTimeout(fs.promises.statfs(share.localPath), 5000);
+      space = { shareId: share.id, label: share.label, path: share.localPath, total: st.blocks * st.bsize, free: st.bavail * st.bsize };
+    } catch (e) {
+      error = `Couldn't read space on ${share.localPath}: ${(e as Error).message}`;
+      // Unreachable share — the panel falls back to the deck's own figures. Log once per outage, not every poll.
+      if (hit?.space !== null) console.warn(`[nas] couldn't read space on ${share.localPath}: ${(e as Error).message}`);
+    }
+    this.spaceCache.set(share.localPath, { at: Date.now(), space, error });
+    this.noteSpaceError(device.id, error);
+    return space;
+  }
+
+  private noteSpaceError(deviceId: string, error?: string) {
+    if (error) this.lastSpaceError.set(deviceId, error);
+    else this.lastSpaceError.delete(deviceId);
   }
 
   // --------------------------------------------------------------------------- FTP
@@ -367,4 +415,11 @@ async function walkLocal(root: string, rel: string, depth: number, out: Map<stri
 export function normaliseShareUrl(url?: string | null): string | null {
   if (!url) return null;
   return url.trim().replace(/^(smb|afp|cifs|nfs):\/\//i, '//').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timed out')), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
 }

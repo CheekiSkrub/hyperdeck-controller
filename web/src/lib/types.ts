@@ -30,6 +30,15 @@ export interface SlotInfo {
   totalSize?: number;
 }
 
+/** Space on the mapped NAS share, measured by the server (see /api/devices/:id/nas/space). */
+export interface ShareSpace {
+  shareId: string;
+  label: string;
+  path: string;
+  total: number;
+  free: number;
+}
+
 export interface TimelineClip {
   id: number;
   name: string;

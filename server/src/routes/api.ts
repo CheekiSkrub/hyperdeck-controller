@@ -227,6 +227,15 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     if (b.url) ensureShareForNasUrl(req.params.id, b.url);
     return { url: await devices.nasSelected(req.params.id) };
   });
+  // Space on the mapped share behind the deck's network slot (null if none is mapped/reachable).
+  app.get<IdParams>('/api/devices/:id/nas/space', async (req) => {
+    const d = devices.get(req.params.id);
+    const state = devices.client(d.id).state;
+    const slot = state.slots.find((s) => locator.isNetworkSlot(d, state, s.slotId));
+    if (!slot) return { slotId: null, space: null };
+    const space = await locator.networkSpace(d, state);
+    return { slotId: slot.slotId, space, error: space ? undefined : locator.lastSpaceError.get(d.id) };
+  });
   app.get<IdParams>('/api/devices/:id/nas/discovered', async (req) => devices.nasDiscover(req.params.id));
 
   // ------------------------------------------------------------------ Media sources
