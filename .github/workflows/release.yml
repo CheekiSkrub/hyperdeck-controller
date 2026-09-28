@@ -1,0 +1,154 @@
+name: Build & sign
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  package:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, label: windows-x64 }
+          - { os: macos-14, label: macos-arm64 }
+          - { os: macos-13, label: macos-x64 }
+          - { os: ubuntu-22.04, label: linux-x64 }
+    runs-on: ${{ matrix.os }}
+    env:
+      # Step-level `if:` can't read secrets directly, so expose presence flags.
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERT_P12_BASE64 != '' }}
+      HAS_AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      HAS_WINDOWS_PFX: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' }}
+      HAS_GPG: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run package
+        shell: bash
+
+      - name: Locate build
+        id: dir
+        shell: bash
+        run: echo "path=$(ls -d release/hyperdeck-controller-*/ | head -1)" >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------------------------------ macOS: Developer ID + notarization
+      - name: Sign & notarize (macOS)
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true'
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }} # "Developer ID Application: Rebus Industries (TEAMID)"
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          KEYCHAIN=build.keychain
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > cert.p12
+          security create-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          security import cert.p12 -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KEYCHAIN"
+          DIR="${{ steps.dir.outputs.path }}"
+          for bin in ffmpeg ffprobe hyperdeck-controller; do
+            codesign --force --timestamp --options runtime \
+              --entitlements scripts/entitlements.mac.plist \
+              --sign "$APPLE_SIGNING_IDENTITY" "$DIR/$bin"
+          done
+          codesign --verify --strict --verbose=2 "$DIR/hyperdeck-controller"
+          echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > AuthKey.p8
+          ditto -c -k --keepParent "$DIR" notarize.zip
+          xcrun notarytool submit notarize.zip --key AuthKey.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+          rm -f cert.p12 AuthKey.p8 notarize.zip
+
+      # ------------------------------------------------------------------ Windows: Authenticode (Azure Trusted Signing)
+      - name: Sign (Windows, Azure Trusted Signing)
+        if: runner.os == 'Windows' && env.HAS_AZURE_SIGNING == 'true'
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ steps.dir.outputs.path }}
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Sign (Windows, PFX certificate)
+        if: runner.os == 'Windows' && env.HAS_AZURE_SIGNING != 'true' && env.HAS_WINDOWS_PFX == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          Get-ChildItem "${{ steps.dir.outputs.path }}" -Filter *.exe | ForEach-Object {
+            & $signtool.FullName sign /f cert.pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName
+          }
+          Remove-Item cert.pfx
+
+      # ------------------------------------------------------------------ Archive (+ GPG signature on Linux)
+      - name: Archive
+        shell: bash
+        run: |
+          cd release
+          NAME=$(basename "${{ steps.dir.outputs.path }}")
+          if [ "$RUNNER_OS" = "Linux" ]; then tar czf "$NAME.tar.gz" "$NAME"; else 7z a -tzip "$NAME.zip" "$NAME" >/dev/null || zip -qr "$NAME.zip" "$NAME"; fi
+
+      - name: GPG sign (Linux)
+        if: runner.os == 'Linux' && env.HAS_GPG == 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          cd release
+          for f in *.tar.gz; do
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --armor --detach-sign "$f"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: |
+            release/*.zip
+            release/*.tar.gz
+            release/*.asc
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - run: cd dist && sha256sum * > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: true

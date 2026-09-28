@@ -1,0 +1,30 @@
+{
+  "name": "hyperdeck-controller",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform server + browser control panel for Blackmagic HyperDeck recorders",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"npm run dev --workspace server\" \"npm run dev --workspace web\"",
+    "dev:mock": "tsx tools/mock-hyperdeck.ts",
+    "build": "npm run build --workspace web && npm run build --workspace server",
+    "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web",
+    "test": "npm test --workspace server",
+    "package": "node scripts/build-sea.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0",
+    "ftp-srv": "^4.6.3",
+    "postject": "^1.0.0-alpha.6",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

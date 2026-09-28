@@ -1,0 +1,9 @@
+This distribution bundles FFmpeg (ffmpeg, ffprobe) as separate executables.
+FFmpeg is licensed under the LGPL v2.1+ / GPL v2+ depending on build
+configuration. Source code: https://ffmpeg.org/download.html
+The bundled builds come from the ffmpeg-static / ffprobe-static projects
+(https://github.com/eugeneware/ffmpeg-static, https://github.com/joshwnj/ffprobe-static)
+unless replaced at build time via FFMPEG_DIR.
+
+It also embeds Node.js (MIT, https://nodejs.org), Fastify (MIT), ws (MIT),
+basic-ftp (MIT), React (MIT).

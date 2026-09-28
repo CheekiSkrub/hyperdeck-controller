@@ -1,0 +1,128 @@
+// Mirrors of the server's JSON shapes.
+
+export interface TransportInfo {
+  status: 'preview' | 'stopped' | 'play' | 'forward' | 'rewind' | 'jog' | 'shuttle' | 'record';
+  speed: number;
+  slotId: number | null;
+  slotName?: string;
+  deviceName?: string;
+  clipId: number | null;
+  singleClip: boolean;
+  displayTimecode: string;
+  timecode: string;
+  videoFormat: string;
+  loop: boolean;
+  timeline?: number;
+  inputVideoFormat?: string;
+  referenceLocked?: boolean;
+}
+
+export interface SlotInfo {
+  slotId: number;
+  slotName?: string;
+  deviceName?: string;
+  status: string;
+  volumeName?: string;
+  recordingTime?: number;
+  videoFormat?: string;
+  blocked?: boolean;
+  remainingSize?: number;
+  totalSize?: number;
+}
+
+export interface TimelineClip {
+  id: number;
+  name: string;
+  startTimecode: string;
+  duration: string;
+  inTimecode?: string;
+  outTimecode?: string;
+}
+
+export interface DeviceState {
+  status: 'disconnected' | 'connecting' | 'connected';
+  lastError?: string;
+  info: { protocolVersion?: string; model?: string; uniqueId?: string; slotCount: number; softwareVersion?: string; name?: string } | null;
+  transport: TransportInfo | null;
+  slots: SlotInfo[];
+  disks: Record<number, { index: number; name: string; fileFormat: string; videoFormat: string; duration: string }[]>;
+  timeline: TimelineClip[];
+  remote: { enabled: boolean; override: boolean } | null;
+  nasUrl: string | null;
+}
+
+export interface ShareMapping {
+  id?: string;
+  label: string;
+  url?: string;
+  localPath: string;
+}
+
+export interface Device {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  ftp: { enabled: boolean; port: number; user: string; password: string };
+  shares: ShareMapping[];
+  createdAt: string;
+  state: DeviceState;
+}
+
+export interface ClipListing {
+  slotId: number;
+  slotLabel: string;
+  isNetwork: boolean;
+  index: number;
+  file: string;
+  fileFormat: string;
+  videoFormat: string;
+  duration: string;
+  fps: number | null;
+  frames: number | null;
+  timelineId: number | null;
+}
+
+export interface ProbeResult {
+  duration: number;
+  startTime: number;
+  fps: number;
+  frames: number;
+  width: number;
+  height: number;
+  codec: string;
+  profile?: string;
+  timecode?: string;
+  audioChannels: number;
+  size?: number;
+}
+
+export interface ProxyStatus {
+  key: string;
+  state: 'none' | 'queued' | 'running' | 'ready' | 'error';
+  progress: number;
+  error?: string;
+}
+
+export interface MediaInfo {
+  key: string;
+  source: { kind: 'ftp' | 'share'; display: string; size?: number };
+  probe: ProbeResult;
+  proxy: ProxyStatus;
+}
+
+export interface StripStatus {
+  key: string;
+  count: number;
+  duration: number;
+  fps: number;
+  times: number[];
+  ready: boolean[];
+  done: boolean;
+}
+
+export interface SourcesTest {
+  ftp: { ok: boolean; message: string; mediaFiles?: number; folders?: string[] };
+  shares: { id: string; label: string; ok: boolean; message: string }[];
+  nasUrl: string | null;
+}

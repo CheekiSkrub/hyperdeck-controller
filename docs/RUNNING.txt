@@ -1,0 +1,28 @@
+HyperDeck Controller
+====================
+
+1. Run the "hyperdeck-controller" program in this folder
+   (Windows: hyperdeck-controller.exe). Keep ffmpeg and ffprobe next to it.
+2. Your browser opens the control panel at http://localhost:8080.
+   Other machines on the network can use http://<this-computer's-IP>:8080.
+3. Click "+ Add HyperDeck", enter a name and the deck's IP address.
+
+Requirements on the HyperDeck
+- Ethernet protocol (TCP 9993) is always on; enable "Remote" on the deck
+  (or from the panel) so transport commands are accepted.
+- Enable FTP / file transfer on the deck for thumbnails and scrubbing of clips
+  on SSD / SD / CFast / USB media.
+- If the deck records to network storage (SMB/AFP), make the same share
+  readable from this computer and add it under Edit > Media access:
+    Windows: \\nas\Recordings  (UNC path, no mapping needed)
+    macOS:   /Volumes/Recordings  (mount it in Finder first)
+    Linux:   /mnt/recordings  (mount with cifs)
+
+Settings, device list: 
+  Windows %APPDATA%\HyperDeckController
+  macOS   ~/Library/Application Support/HyperDeckController
+  Linux   ~/.config/hyperdeck-controller
+Edit settings.json there to change the port (default 8080).
+
+Environment overrides: HDC_PORT, HDC_HOST, HDC_NO_BROWSER=1, HDC_DATA_DIR,
+HDC_CACHE_DIR, FFMPEG_PATH, FFPROBE_PATH.
