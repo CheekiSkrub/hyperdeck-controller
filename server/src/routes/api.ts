@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { saveSettings, type Settings } from '../config.js';
 import type { EditEntry } from '../devices/edit.js';
 import { CommandError, type DeviceManager } from '../devices/manager.js';
-import { ValidationError, type DeviceInput } from '../devices/store.js';
+import { ValidationError, type DeviceInput, type ShareMapping } from '../devices/store.js';
 import type { TestDeckManager } from '../devices/testDeck.js';
 import type { CredentialStore } from '../devices/credentials.js';
 import type { TimelineStore } from '../devices/timelines.js';
@@ -252,21 +252,38 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     return [...shareSources, ...credSources];
   });
 
-  app.post<IdParams>('/api/devices/:id/network-drives/browse', async (req) => {
-    const d = devices.get(req.params.id);
-    const b = req.body as { key: string; subPath?: string };
-    const [kind, id] = (b.key ?? '').split(':');
+  function resolveNetworkDriveSource(d: ReturnType<typeof devices.get>, key: string): { root: string; username?: string; password?: string } {
+    const [kind, id] = (key ?? '').split(':');
     if (kind === 'share') {
       const share = d.shares.find((s) => s.id === id);
       if (!share) throw new ValidationError('Share not found');
-      return locator.browse(share.localPath, b.subPath, share.username, share.password);
+      return { root: share.localPath, username: share.username, password: share.password };
     }
     if (kind === 'credential') {
       const c = ctx.credentials.get(id);
       if (!c) throw new ValidationError('Saved credential not found');
-      return locator.browse(c.path ?? '', b.subPath, c.username, c.password);
+      return { root: c.path ?? '', username: c.username, password: c.password };
     }
     throw new ValidationError('Unknown network drive source');
+  }
+
+  app.post<IdParams>('/api/devices/:id/network-drives/browse', async (req) => {
+    const d = devices.get(req.params.id);
+    const b = req.body as { key: string; subPath?: string };
+    const { root, username, password } = resolveNetworkDriveSource(d, b.key);
+    return locator.browse(root, b.subPath, username, password);
+  });
+
+  app.get<IdParams>('/api/devices/:id/network-drives/thumb', async (req, reply) => {
+    const d = devices.get(req.params.id);
+    const q = req.query as Record<string, string>;
+    const { root, username, password } = resolveNetworkDriveSource(d, q.key ?? '');
+    if (!root.trim()) throw new ValidationError('No path configured for this source');
+    if (username) await locator.connectShare({ label: 'thumb', localPath: root, username, password } as ShareMapping);
+    const abs = locator.resolveEntryPath(root, q.path ?? '');
+    if (!abs) throw new ValidationError('That path is outside the mapped folder.');
+    const file = await media.networkThumbnail(d.id, abs);
+    return sendJpeg(reply, file, true);
   });
 
   app.get<IdParams>('/api/devices/:id/media/info', async (req) => {

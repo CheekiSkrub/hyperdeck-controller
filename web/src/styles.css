@@ -194,6 +194,8 @@ h2 { font-size: 16px; }
 button.nd-entry { cursor: pointer; }
 button.nd-entry:hover { background: var(--panel-2); }
 .nd-icon { flex: 0 0 auto; }
+.nd-thumb { flex: 0 0 auto; width: 40px; height: 24px; border-radius: 3px; overflow: hidden; background: #07080a; display: grid; place-items: center; }
+.nd-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .nd-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nd-size { flex: 0 0 auto; }
 

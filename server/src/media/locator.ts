@@ -277,6 +277,19 @@ export class MediaLocator {
     }
   }
 
+  /**
+   * Resolve a path relative to `root` (as returned by browse()'s `path`, or a
+   * `path/name` built from it) to a safe absolute path — guards against the
+   * relative path escaping `root` the same way browse() does. Returns null if
+   * it would.
+   */
+  resolveEntryPath(root: string, relPath: string): string | null {
+    const resolvedRoot = path.resolve(root);
+    const target = path.resolve(path.join(root, relPath));
+    if (target !== resolvedRoot && !target.startsWith(resolvedRoot + path.sep)) return null;
+    return target;
+  }
+
   async testFtp(device: Device): Promise<{ ok: boolean; message: string; mediaFiles?: number; folders?: string[] }> {
     try {
       const files = await this.getFtpIndex(device, true);

@@ -135,6 +135,24 @@ export class MediaService extends EventEmitter {
     return d;
   }
 
+  /**
+   * Thumbnail for a file found while browsing a mapped share or saved credential
+   * (the Network drives tab) — these aren't a HyperDeck clip, so they skip
+   * `resolve()`/slot lookup entirely and go straight from an absolute local path,
+   * cached by that path plus size/mtime so an edited file re-thumbnails.
+   */
+  async networkThumbnail(deviceId: string, absPath: string): Promise<string> {
+    const st = await fs.promises.stat(absPath);
+    const key = crypto.createHash('sha1').update(['net', absPath, st.size, st.mtimeMs].join('|')).digest('hex').slice(0, 20);
+    const file = path.join(this.dir(key), 'thumb.jpg');
+    if (fs.existsSync(file)) return file;
+    const p = await this.sem(deviceId).run(PRIO.probe, () => probe(absPath));
+    const t = Math.min(1, Math.max(0, p.duration / 10));
+    const buf = await this.sem(deviceId).run(PRIO.thumb, () => grabFrame(absPath, t, THUMB_HEIGHT));
+    await fs.promises.writeFile(file, buf);
+    return file;
+  }
+
   async thumbnail(device: Device, state: HyperDeckState, ref: ClipRef): Promise<string> {
     const m = await this.media(device, state, ref);
     const file = path.join(this.dir(m.key), 'thumb.jpg');

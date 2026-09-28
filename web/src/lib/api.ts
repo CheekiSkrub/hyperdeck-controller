@@ -37,6 +37,8 @@ export const api = {
   networkDriveSources: (id: string) => req<NetworkDriveSource[]>('GET', `/api/devices/${id}/network-drives/sources`),
   browseNetworkDrive: (id: string, key: string, subPath?: string) =>
     req<{ ok: boolean; message: string; path?: string; entries?: NetworkDriveEntry[] }>('POST', `/api/devices/${id}/network-drives/browse`, { key, subPath }),
+  networkThumbUrl: (id: string, key: string, relPath: string) =>
+    `/api/devices/${id}/network-drives/thumb?key=${encodeURIComponent(key)}&path=${encodeURIComponent(relPath)}`,
 
   command: (id: string, command: string, params?: Record<string, string | number | boolean>) =>
     req<{ code: number; text: string }>('POST', `/api/devices/${id}/command`, { command, params }),

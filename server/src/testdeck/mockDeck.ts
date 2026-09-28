@@ -187,6 +187,17 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     },
   };
 
+  // The NAS slot's reported "volume name" should track whichever bookmark is
+  // currently selected (matches how a real deck names the mounted share), not a
+  // name fixed when the mock deck was created — otherwise switching the active
+  // NAS mapping (e.g. to Bamboo) leaves the Clips panel still reading "Studio NAS".
+  function nasVolumeName(): string {
+    const url = rest.nas.selected;
+    if (!url) return 'NAS (unmounted)';
+    const m = /^(?:smb:\/\/|\\\\)([^/\\]+)/i.exec(url);
+    return m ? m[1] : 'NAS';
+  }
+
   const clients = new Set<net.Socket>();
   const notifyOn = new WeakMap<net.Socket, Set<string>>();
   function notify(kind: string, code: number, title: string, lines: string[]) {
@@ -249,9 +260,9 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
         const id = Number(params['slot id'] ?? deck.slotId);
         const s = slots[id];
         if (!s) return '102 invalid value\r\n';
-        return block(202, 'slot info', [`slot id: ${id}`, `slot name: ${s.name}`, `device name: ${s.name}`, 'status: mounted', `volume name: ${id === 3 ? 'Studio NAS' : 'Media ' + id}`, 'recording time: 3600', 'video format: 1080p25', 'blocked: false', 'remaining size: 100000000000', 'total size: 500000000000']);
+        return block(202, 'slot info', [`slot id: ${id}`, `slot name: ${s.name}`, `device name: ${s.name}`, 'status: mounted', `volume name: ${id === 3 ? nasVolumeName() : 'Media ' + id}`, 'recording time: 3600', 'video format: 1080p25', 'blocked: false', 'remaining size: 100000000000', 'total size: 500000000000']);
       }
-      case 'nas selected': return block(224, 'nas selected', ['url: smb://nas.local/Recordings']);
+      case 'nas selected': return block(224, 'nas selected', rest.nas.selected ? [`url: ${rest.nas.selected}`] : ['url: none']);
       case 'disk list': {
         const id = Number(params['slot id'] ?? deck.slotId);
         const s = slots[id];

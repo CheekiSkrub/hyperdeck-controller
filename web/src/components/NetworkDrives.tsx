@@ -99,7 +99,11 @@ export function NetworkDrives({ device, knownClips, onOpen, notify }: {
                   </button>
                 ) : (
                   <span className="nd-entry">
-                    <span className="nd-icon" aria-hidden>{MEDIA_EXT.test(e.name) ? '🎬' : '📄'}</span>
+                    {MEDIA_EXT.test(e.name) ? (
+                      <NdThumb deviceId={device.id} sourceKey={sourceKey!} relPath={[...path, e.name].join('/')} />
+                    ) : (
+                      <span className="nd-icon" aria-hidden>📄</span>
+                    )}
                     <span className="nd-name">{e.name}</span>
                     {e.size !== undefined && <span className="muted small nd-size">{formatSize(e.size)}</span>}
                     {known ? (
@@ -117,6 +121,16 @@ export function NetworkDrives({ device, knownClips, onOpen, notify }: {
         </ul>
       )}
     </div>
+  );
+}
+
+function NdThumb({ deviceId, sourceKey, relPath }: { deviceId: string; sourceKey: string; relPath: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <span className="nd-icon" aria-hidden>🎬</span>;
+  return (
+    <span className="nd-thumb">
+      <img loading="lazy" src={api.networkThumbUrl(deviceId, sourceKey, relPath)} alt="" onError={() => setFailed(true)} />
+    </span>
   );
 }
 
