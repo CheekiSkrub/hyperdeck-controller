@@ -102,7 +102,7 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     try {
       execFileSync(opts.ffmpeg, args(withText), { stdio: 'pipe' });
     } catch {
-      execFileSync(opts.ffmpeg, args(codec === 'prores' ? 'format=yuv422p10le' : ''));
+      execFileSync(opts.ffmpeg, args(codec === 'prores' ? 'format=yuv422p10le' : ''), { stdio: 'pipe' });
     }
   };
 
@@ -123,8 +123,12 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     for (const f of names.slice(0, 300)) {
       try {
         const full = path.join(dir, f);
-        const d = Number(execFileSync(opts.ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', full]).toString().trim());
-        const tcTag = execFileSync(opts.ffprobe, ['-v', 'error', '-show_entries', 'stream_tags=timecode:format_tags=timecode', '-of', 'default=nw=1:nk=1', full]).toString().trim().split('\n')[0] ?? '';
+        // stdio: 'pipe' on stderr too — execFileSync forwards a failing child's stderr straight
+        // to this process's own stderr by default, which otherwise floods the server console
+        // with ffprobe's raw diagnostic output for every corrupt/partial file on a real share.
+        const probeOpts: { stdio: ['ignore', 'pipe', 'pipe'] } = { stdio: ['ignore', 'pipe', 'pipe'] };
+        const d = Number(execFileSync(opts.ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', full], probeOpts).toString().trim());
+        const tcTag = execFileSync(opts.ffprobe, ['-v', 'error', '-show_entries', 'stream_tags=timecode:format_tags=timecode', '-of', 'default=nw=1:nk=1', full], probeOpts).toString().trim().split('\n')[0] ?? '';
         const m = /(\d+):(\d+):(\d+)[:;](\d+)/.exec(tcTag);
         const tcStart = m ? ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * FPS + Number(m[4]) : 0;
         out.push({ name: f, frames: Math.round((d || 0) * FPS), format: /\.mp4$/i.test(f) ? 'H.264High' : 'QuickTimeProRes', tcStart });
@@ -192,7 +196,10 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     if (seq !== refreshSeq) return; // superseded by a newer selection change
     slots[3].dir = dir;
     slots[3].files = scanSlotFiles(dir);
-    if (deck.slotId === 3) rebuildTimeline();
+    // Deliberately does NOT touch deck.timeline/rebuildTimeline() here: changing which NAS
+    // bookmark is selected should only update what's *available* to browse/load from slot 3,
+    // not silently dump every clip on a (possibly large, messy) real share onto the deck's
+    // playback queue. The timeline only rebuilds from an explicit "slot select" action below.
   }
 
   const tc = (frames: number) => {
