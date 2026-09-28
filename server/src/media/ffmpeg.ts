@@ -115,12 +115,12 @@ function parseRate(r?: string): number {
   return d ? n / d : n;
 }
 
-export async function probe(input: string, signal?: AbortSignal): Promise<ProbeResult> {
+export async function probe(input: string, signal?: AbortSignal, timeoutMs = 60000): Promise<ProbeResult> {
   const buf = await run(ffprobeBin, [
     '-v', 'error', ...inputOptions(input),
     '-show_entries', 'format=duration,start_time,size:format_tags=timecode:stream=codec_type,codec_name,profile,width,height,r_frame_rate,avg_frame_rate,nb_frames,channels:stream_tags=timecode',
     '-of', 'json', input,
-  ], { signal, timeoutMs: 60000 });
+  ], { signal, timeoutMs });
   const j = JSON.parse(buf.toString());
   const v = (j.streams ?? []).find((s: any) => s.codec_type === 'video') ?? {};
   const audio = (j.streams ?? []).filter((s: any) => s.codec_type === 'audio');
@@ -147,7 +147,7 @@ export async function probe(input: string, signal?: AbortSignal): Promise<ProbeR
  * decoding and only reads the bytes it needs, so this works directly against
  * huge files on FTP or a share.
  */
-export async function grabFrame(input: string, seconds: number, height: number, signal?: AbortSignal): Promise<Buffer> {
+export async function grabFrame(input: string, seconds: number, height: number, signal?: AbortSignal, timeoutMs = 60000): Promise<Buffer> {
   const args = [
     '-hide_banner', '-loglevel', 'error', ...inputOptions(input),
     ...(seconds > 0 ? ['-ss', seconds.toFixed(3)] : []),
@@ -156,7 +156,7 @@ export async function grabFrame(input: string, seconds: number, height: number, 
     '-vf', `scale=-2:${height}:flags=bilinear,format=yuvj420p`,
     '-q:v', '4', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1',
   ];
-  const buf = await run(ffmpegBin, args, { signal, timeoutMs: 60000 });
+  const buf = await run(ffmpegBin, args, { signal, timeoutMs });
   if (!buf.length) throw new Error('No frame decoded (past end of clip?)');
   return buf;
 }
