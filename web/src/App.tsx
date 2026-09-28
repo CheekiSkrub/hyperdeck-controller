@@ -4,6 +4,7 @@ import { DeviceList } from './components/DeviceList';
 import { DeviceView } from './components/DeviceView';
 import { SettingsPage } from './components/SettingsPage';
 import { TopProgressBar } from './components/TopProgressBar';
+import { VersionBadge } from './components/VersionBadge';
 import { api } from './lib/api';
 import { DEMO_BANNER, useDevices, useServerConnected } from './lib/store';
 import type { Device } from './lib/types';
@@ -59,6 +60,7 @@ export function App() {
           <button className="btn add-device" onClick={() => setEditing('new')}>+ Add HyperDeck</button>
           <button className="btn ghost" onClick={() => setShowSettings(true)} title="Controller settings">⚙ Settings</button>
         </div>
+        <VersionBadge online={online} />
       </aside>
 
       <main className="main">

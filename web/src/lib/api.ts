@@ -23,7 +23,7 @@ const q = (slot: number, file: string) => `slot=${slot}&file=${encodeURIComponen
 export type DeviceInput = Partial<Pick<Device, 'name' | 'host' | 'port' | 'restPort' | 'ftp' | 'shares'>>;
 
 export const api = {
-  info: () => req<{ version: string; platform: string; ffmpeg: { ok: boolean; ffmpeg: string } }>('GET', '/api/info'),
+  info: () => req<{ version: string; commit?: string; builtAt?: string; platform: string; ffmpeg: { ok: boolean; ffmpeg: string } }>('GET', '/api/info'),
   appSettings: () => req<AppSettings>('GET', '/api/settings'),
   updateAppSettings: (patch: Partial<AppSettings>) => req<AppSettings & { restartRequired: boolean }>('PATCH', '/api/settings', patch),
 

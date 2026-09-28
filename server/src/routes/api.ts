@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import type { BuildInfo } from '../buildInfo.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { saveSettings, type Settings } from '../config.js';
 import type { EditEntry } from '../devices/edit.js';
@@ -23,6 +24,7 @@ interface Ctx {
   settings: Settings;
   dataDir: string;
   version: string;
+  build: BuildInfo;
   ffmpegOk: boolean;
 }
 
@@ -49,6 +51,8 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
 
   app.get('/api/info', async () => ({
     version: ctx.version,
+    commit: ctx.build.commit,
+    builtAt: ctx.build.builtAt,
     platform: process.platform,
     ffmpeg: { ok: ctx.ffmpegOk, ...ffmpegPaths() },
   }));

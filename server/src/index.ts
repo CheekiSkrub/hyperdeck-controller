@@ -15,9 +15,10 @@ import { MediaLocator } from './media/locator.js';
 import { MediaService } from './media/service.js';
 import { registerApi } from './routes/api.js';
 import { registerStatic } from './static.js';
+import { buildInfo } from './buildInfo.js';
 
-declare const __APP_VERSION__: string | undefined;
-const VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0-dev';
+const BUILD = buildInfo();
+const VERSION = BUILD.version;
 
 async function main() {
   const dataDir = defaultDataDir();
@@ -62,12 +63,12 @@ async function main() {
   });
 
   bridge.register(app, (id) => store.get(id));
-  await registerApi(app, { devices, testDecks, timelines, credentials, media, locator, bridge, settings, dataDir, version: VERSION, ffmpegOk: ff.ok });
+  await registerApi(app, { devices, testDecks, timelines, credentials, media, locator, bridge, settings, dataDir, version: VERSION, build: BUILD, ffmpegOk: ff.ok });
   registerStatic(app);
 
   await app.listen({ port: settings.port, host: settings.host });
   const urls = lanUrls(settings.port);
-  console.log(`\n  ${APP_NAME} ${VERSION}\n  Control panel:\n${urls.map((u) => `    ${u}`).join('\n')}\n  Data: ${dataDir}\n`);
+  console.log(`\n  ${APP_NAME} ${VERSION} (${BUILD.commit})\n  Control panel:\n${urls.map((u) => `    ${u}`).join('\n')}\n  Data: ${dataDir}\n`);
 
   if (settings.openBrowser && !process.env.HDC_NO_BROWSER) openBrowser(`http://localhost:${settings.port}`);
 

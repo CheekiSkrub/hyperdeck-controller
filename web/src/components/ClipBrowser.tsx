@@ -3,33 +3,10 @@ import { api } from '../lib/api';
 import type { ClipListing, Device } from '../lib/types';
 import { CLIP_MIME, type DraggedClip } from './EditTimeline';
 import { NetworkDrives } from './NetworkDrives';
-
-type ViewMode = 'tiles' | 'details';
-type SortKey = 'name' | 'date';
-type SortDir = 'asc' | 'desc';
-
-const VIEW_KEY = 'hdc.clips.view';
-const SIZE_KEY = 'hdc.clips.tileSize';
-const SORT_KEY = 'hdc.clips.sort';
-
-function loadView(): ViewMode {
-  try { return (localStorage.getItem(VIEW_KEY) as ViewMode) === 'details' ? 'details' : 'tiles'; } catch { return 'tiles'; }
-}
-function loadTileSize(): number {
-  try { const n = Number(localStorage.getItem(SIZE_KEY)); return n >= 120 && n <= 320 ? n : 210; } catch { return 210; }
-}
-function loadSort(): { key: SortKey; dir: SortDir } {
-  try {
-    const raw = localStorage.getItem(SORT_KEY);
-    if (!raw) throw 0;
-    const v = JSON.parse(raw);
-    return { key: v.key === 'date' ? 'date' : 'name', dir: v.dir === 'desc' ? 'desc' : 'asc' };
-  } catch {
-    return { key: 'name', dir: 'asc' };
-  }
-}
+import { BrowserToolbar, useBrowserPrefs, type SortDir, type SortKey } from './BrowserToolbar';
 
 function sortClips(list: ClipListing[], key: SortKey, dir: SortDir): ClipListing[] {
+  // No size on deck clips; anything but date sorts by name.
   const factor = dir === 'asc' ? 1 : -1;
   return [...list].sort((a, b) => {
     // The HyperDeck protocol's disk listing carries no file date, only the order clips were
@@ -45,14 +22,10 @@ export function ClipBrowser({ device, onOpen, notify }: { device: Device; onOpen
   const [slot, setSlot] = useState<number | 'all'>('all');
   const [search, setSearch] = useState('');
   const [mode, setMode] = useState<'clips' | 'network'>('clips');
-  const [view, setView] = useState<ViewMode>(loadView);
-  const [tileSize, setTileSize] = useState<number>(loadTileSize);
-  const [sort, setSort] = useState(loadSort);
+  const [netSearch, setNetSearch] = useState('');
+  const [prefs, setPrefs] = useBrowserPrefs();
+  const { view, tileSize } = prefs;
   const s = device.state;
-
-  useEffect(() => { try { localStorage.setItem(VIEW_KEY, view); } catch { /* ignore */ } }, [view]);
-  useEffect(() => { try { localStorage.setItem(SIZE_KEY, String(tileSize)); } catch { /* ignore */ } }, [tileSize]);
-  useEffect(() => { try { localStorage.setItem(SORT_KEY, JSON.stringify(sort)); } catch { /* ignore */ } }, [sort]);
 
   // Re-fetch whenever the deck reports different media or timeline.
   const signature = useMemo(
@@ -66,7 +39,7 @@ export function ClipBrowser({ device, onOpen, notify }: { device: Device; onOpen
 
   const slots = useMemo(() => [...new Map(clips.map((c) => [c.slotId, c.slotLabel])).entries()], [clips]);
   const filtered = clips.filter((c) => (slot === 'all' || c.slotId === slot) && c.file.toLowerCase().includes(search.toLowerCase()));
-  const shown = useMemo(() => sortClips(filtered, sort.key, sort.dir), [filtered, sort]);
+  const shown = useMemo(() => sortClips(filtered, prefs.sortKey, prefs.sortDir), [filtered, prefs.sortKey, prefs.sortDir]);
 
   return (
     <section className="card clips">
@@ -79,42 +52,16 @@ export function ClipBrowser({ device, onOpen, notify }: { device: Device; onOpen
           ))}
           <button className={mode === 'network' ? 'on' : ''} onClick={() => setMode('network')}>Network drives</button>
         </div>
-        {mode === 'clips' && (
-          <>
-            <input className="search" placeholder="Search clips" value={search} onChange={(e) => setSearch(e.target.value)} />
-            <div className="clips-toolbar">
-              <label className="sort-control">
-                Sort
-                <select value={sort.key} onChange={(e) => setSort((v) => ({ ...v, key: e.target.value as SortKey }))}>
-                  <option value="name">Name</option>
-                  <option value="date">Date recorded</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                className="btn small ghost sort-dir"
-                title={sort.dir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
-                onClick={() => setSort((v) => ({ ...v, dir: v.dir === 'asc' ? 'desc' : 'asc' }))}
-              >
-                {sort.dir === 'asc' ? '↑' : '↓'}
-              </button>
-              <div className="seg small" role="group" aria-label="View">
-                <button className={view === 'tiles' ? 'on' : ''} title="Tiles" onClick={() => setView('tiles')}>▦</button>
-                <button className={view === 'details' ? 'on' : ''} title="Details" onClick={() => setView('details')}>☰</button>
-              </div>
-              {view === 'tiles' && (
-                <input
-                  type="range" className="tile-size" min={120} max={320} step={10} value={tileSize}
-                  onChange={(e) => setTileSize(Number(e.target.value))} title="Tile size"
-                  aria-label="Tile size"
-                />
-              )}
-            </div>
-          </>
+        {mode === 'clips' ? (
+          <BrowserToolbar prefs={prefs} set={setPrefs} search={search} onSearch={setSearch} placeholder="Search clips"
+            sortOptions={[{ key: 'name', label: 'Name' }, { key: 'date', label: 'Date recorded' }]} />
+        ) : (
+          <BrowserToolbar prefs={prefs} set={setPrefs} search={netSearch} onSearch={setNetSearch} placeholder="Search this folder"
+            sortOptions={[{ key: 'name', label: 'Name' }, { key: 'date', label: 'Date modified' }, { key: 'size', label: 'Size' }]} />
         )}
       </div>
       {mode === 'network' ? (
-        <NetworkDrives device={device} knownClips={clips} onOpen={onOpen} notify={notify} />
+        <NetworkDrives device={device} knownClips={clips} onOpen={onOpen} notify={notify} search={netSearch} prefs={prefs} />
       ) : s.status !== 'connected' && clips.length === 0 ? (
         <p className="muted">Connect to the HyperDeck to browse its clips.</p>
       ) : shown.length === 0 ? (

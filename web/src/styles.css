@@ -506,3 +506,17 @@ button.nd-entry:hover { background: var(--panel-2); }
 .stl-actions { display: inline-flex; gap: 2px; flex: none; }
 .stl-new { display: flex; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
 .stl-new input { flex: 1; min-width: 0; }
+
+/* ------------------------------------------------------------ version badge */
+.version-badge { padding: 10px 16px 14px; font-size: 11px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--line); }
+.version-badge .mono { color: var(--text, inherit); }
+.version-badge.mismatch { color: #f0b429; }
+.version-warn { margin-top: 4px; color: #f0b429; line-height: 1.35; }
+
+/* network drives in tiles/details view */
+.nd-card { cursor: default; }
+.nd-card-dir { cursor: pointer; }
+.nd-big-icon { font-size: 40px; }
+.nd-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 26px; }
+.nd-card-meta > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip-table tbody tr.nd-row-file { cursor: default; }
