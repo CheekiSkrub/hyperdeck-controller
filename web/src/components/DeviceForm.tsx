@@ -194,7 +194,7 @@ export function DeviceForm({ device, onClose, onSaved, onDeleted }: {
                   <div className="row3 share-connect">
                     <label><span>Username</span><input value={s.username ?? ''} onChange={(e) => updateShare(i, { username: e.target.value })} placeholder="This server's own login for the share" /></label>
                     <label><span>Password</span><input type="password" value={s.password ?? ''} onChange={(e) => updateShare(i, { password: e.target.value })} /></label>
-                    <CredentialPicker onPick={(c) => updateShare(i, { username: c.username, password: c.password })} />
+                    <CredentialPicker onPick={(c) => updateShare(i, { username: c.username, password: c.password, ...(c.path ? { localPath: c.path } : {}) })} />
                     <label className="share-connect-action">
                       <span>&nbsp;</span>
                       {s.id ? (

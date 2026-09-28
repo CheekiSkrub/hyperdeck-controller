@@ -171,7 +171,7 @@ export function NasSettings({ device, notify }: { device: Device; notify: (m: st
           <label><span>New mapping URL</span><input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="smb://nas.local/Recordings" /></label>
           <label><span>Username</span><input value={newUser} onChange={(e) => setNewUser(e.target.value)} /></label>
           <label><span>Password</span><input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} /></label>
-          <CredentialPicker onPick={(c) => { setNewUser(c.username); setNewPass(c.password); }} />
+          <CredentialPicker onPick={(c) => { setNewUser(c.username); setNewPass(c.password); if (c.path) setNewUrl(c.path); }} />
         </div>
         <div className="nas-add-actions">
           <button type="button" className="btn small ghost" disabled={discovering} onClick={discover}>{discovering ? 'Searching…' : 'Discover'}</button>

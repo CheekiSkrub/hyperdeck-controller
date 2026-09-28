@@ -179,6 +179,12 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     audio: { codec: 'PCM', numChannels: 8 },
     input: 'SDI',
     monitoring: { cleanFeed: false, displayLUT: false, zebra: false, focusAssist: false, frameGuide: false, falseColor: false } as Record<string, boolean>,
+    // Simulated NAS bookmarks/selection, so the "Network storage (deck)" settings UI has something
+    // real to exercise against a test HyperDeck instead of only failing with 404.
+    nas: {
+      bookmarks: [] as { url: string; username?: string; password?: string }[],
+      selected: null as string | null,
+    },
   };
 
   const clients = new Set<net.Socket>();
@@ -412,7 +418,9 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     req.on('end', () => {
       const json = (code: number, v?: unknown) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(v === undefined ? '' : JSON.stringify(v)); };
       const put = req.method === 'PUT' ? JSON.parse(body || '{}') : null;
+      const parsedBody = (req.method === 'PUT' || req.method === 'POST') ? JSON.parse(body || '{}') : null;
       const mon = /^\/monitoring\/([^/]+)\/(\w+)$/.exec(url);
+      const nasBookmarkMatch = /^\/media\/nas\/bookmarks\/(.+)$/.exec(url);
       if (url === '/system/product') return json(200, { deviceName: 'Test Deck', productName: 'HyperDeck Studio HD Pro (Test)', softwareVersion: '8.4' });
       if (url === '/system/codecFormat') { if (put) { rest.codec = put; return json(204); } return json(200, rest.codec); }
       if (url === '/system/supportedCodecFormats') return json(200, { codecs: rest.codecs });
@@ -424,6 +432,39 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
       if (url === '/transports/0/supportedInputVideoSources') return json(200, { supportedInputVideoSources: ['SDI', 'HDMI'] });
       if (url === '/monitoring/display') return json(200, { displays: ['LCD', 'SDI'] });
       if (mon && mon[2] in rest.monitoring) { if (put) { rest.monitoring[mon[2]] = put.enabled; return json(204); } return json(200, { enabled: rest.monitoring[mon[2]] }); }
+      // Simulated NAS bookmark management — enough for the "Network storage (deck)" settings UI to exercise
+      // add/remove/select/discover end to end against a test HyperDeck, not just real hardware.
+      if (url === '/media/nas/bookmarks' && req.method === 'GET') return json(200, { bookmarks: rest.nas.bookmarks.map((b) => ({ url: b.url })) });
+      if (url === '/media/nas/bookmarks' && req.method === 'POST') {
+        const b = parsedBody as { url?: string; username?: string; password?: string };
+        if (!b?.url) return json(400, { error: 'url is required' });
+        if (!rest.nas.bookmarks.some((x) => x.url === b.url)) rest.nas.bookmarks.push({ url: b.url, username: b.username, password: b.password });
+        return json(204);
+      }
+      if (nasBookmarkMatch && req.method === 'PUT') {
+        const target = decodeURIComponent(nasBookmarkMatch[1]);
+        const b = parsedBody as { username?: string; password?: string };
+        let bm = rest.nas.bookmarks.find((x) => x.url === target);
+        if (!bm) { bm = { url: target }; rest.nas.bookmarks.push(bm); }
+        if (b?.username !== undefined) bm.username = b.username;
+        if (b?.password !== undefined) bm.password = b.password;
+        return json(204);
+      }
+      if (nasBookmarkMatch && req.method === 'DELETE') {
+        const target = decodeURIComponent(nasBookmarkMatch[1]);
+        rest.nas.bookmarks = rest.nas.bookmarks.filter((x) => x.url !== target);
+        if (rest.nas.selected === target) rest.nas.selected = null;
+        return json(204);
+      }
+      if (url === '/media/nas/selected' && req.method === 'GET') return json(200, { selected: rest.nas.selected ? { url: rest.nas.selected } : null });
+      if (url === '/media/nas/selected' && req.method === 'PUT') {
+        const b = parsedBody as { selected: { url: string } | null };
+        rest.nas.selected = b?.selected?.url ?? null;
+        return json(204);
+      }
+      if (url === '/media/nas/discovered' && req.method === 'GET') {
+        return json(200, { hosts: [{ hostName: 'nas.local', friendlyName: 'Simulated Studio NAS', ip: '127.0.0.1' }] });
+      }
       json(404, { error: 'not found' });
     });
   });
