@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { saveSettings, type Settings } from '../config.js';
 import { CommandError, type DeviceManager } from '../devices/manager.js';
 import { ValidationError, type DeviceInput } from '../devices/store.js';
-import { ffmpegPaths } from '../media/ffmpeg.js';
+import { ffmpegPaths, spawnLive } from '../media/ffmpeg.js';
 import type { FtpBridge } from '../media/ftpBridge.js';
 import type { MediaLocator } from '../media/locator.js';
 import type { ClipRef, MediaService } from '../media/service.js';
@@ -82,6 +82,10 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     return devices.command(req.params.id, command, params);
   });
 
+  app.put<IdParams>('/api/devices/:id/edit', async (req) => {
+    return devices.setEdit(req.params.id, (req.body as { entries: unknown }).entries);
+  });
+
   app.post<IdParams>('/api/devices/:id/refresh', async (req) => {
     const c = devices.client(req.params.id);
     media.invalidate(req.params.id);
@@ -118,6 +122,43 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
       probe: m.probe,
       proxy: media.proxyStatusForKey(m.key),
     };
+  });
+
+  // Original file for direct <video> playback (H.264/H.265, or ProRes in Safari).
+  // Shares are streamed from disk with Range support; FTP goes through the bridge.
+  app.get<IdParams>('/api/devices/:id/media/original', async (req, reply) => {
+    const { device, state } = ctxFor(req.params.id);
+    const m = await media.media(device, state, clipRef(req));
+    if (m.source.kind === 'ftp' && m.source.remotePath) {
+      const u = new URL(ctx.bridge.url(device.id, m.source.remotePath));
+      return reply.redirect(`${u.pathname}${u.search}`);
+    }
+    return sendRange(req, reply, m.source.input, 'video/mp4');
+  });
+
+  // Live transcode for codecs the browser can't decode (ProRes, DNx). Not seekable:
+  // the viewer restarts the stream at a new ?t= when you play from another point.
+  let liveStreams = 0;
+  app.get<IdParams>('/api/devices/:id/media/live', async (req, reply) => {
+    const { device, state } = ctxFor(req.params.id);
+    const q = req.query as Record<string, string>;
+    const m = await media.media(device, state, clipRef(req));
+    if (liveStreams >= 4) return reply.status(429).send({ error: 'Too many live previews running on this server' });
+    const t = Math.max(0, Math.min(Number(q.t) || 0, m.probe.duration));
+    const child = spawnLive(m.source.input, t, Math.min(720, Number(q.h) || 540));
+    liveStreams++;
+    let done = false;
+    const end = () => {
+      if (done) return;
+      done = true;
+      liveStreams--;
+      child.kill('SIGKILL');
+    };
+    req.raw.on('close', end);
+    child.on('exit', end);
+    reply.header('Content-Type', 'video/mp4');
+    reply.header('Cache-Control', 'no-store');
+    return reply.send(child.stdout);
   });
 
   app.get<IdParams>('/api/devices/:id/media/download', async (req, reply) => {

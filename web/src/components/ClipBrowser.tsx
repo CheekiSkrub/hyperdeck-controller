@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import type { ClipListing, Device } from '../lib/types';
+import { CLIP_MIME, type DraggedClip } from './EditTimeline';
 
 export function ClipBrowser({ device, onOpen, notify }: { device: Device; onOpen: (c: ClipListing) => void; notify: (m: string) => void }) {
   const [clips, setClips] = useState<ClipListing[]>([]);
@@ -52,7 +53,17 @@ function ClipCard({ device, clip, onOpen }: { device: Device; clip: ClipListing;
   const [failed, setFailed] = useState(false);
   const current = device.state.transport?.slotId === clip.slotId && clip.timelineId !== null && device.state.transport?.clipId === clip.timelineId;
   return (
-    <button className={`clip-card ${current ? 'current' : ''}`} onClick={onOpen} title={`Open ${clip.file}`}>
+    <button
+      className={`clip-card ${current ? 'current' : ''}`}
+      onClick={onOpen}
+      title={`Open ${clip.file} · drag onto the timeline to add it`}
+      draggable={clip.frames !== null}
+      onDragStart={(e) => {
+        const data: DraggedClip = { slotId: clip.slotId, file: clip.file, frames: clip.frames ?? 0 };
+        e.dataTransfer.setData(CLIP_MIME, JSON.stringify(data));
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
+    >
       <div className="thumb">
         {failed ? (
           <span className="thumb-fail">No preview{clip.isNetwork ? ' — map network share' : ''}</span>

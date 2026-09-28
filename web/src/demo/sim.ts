@@ -10,6 +10,9 @@ import type { Device, DeviceState, ShareMapping, TransportInfo } from '../lib/ty
 export const FPS = 25;
 
 interface SimClip { name: string; frames: number; look: Look; format: string; tcStart: number }
+/** A timeline entry: `frames` of `src` starting at frame `in`. */
+interface TL { name: string; frames: number; in: number; src: SimClip }
+const full = (c: SimClip): TL => ({ name: c.name, frames: c.frames, in: 0, src: c });
 type Look = 'bars' | 'studio' | 'pitch' | 'city' | 'record';
 interface SimSlot { id: number; name: string; volume: string; clips: SimClip[]; network?: boolean }
 
@@ -17,7 +20,7 @@ interface Sim {
   device: Device;
   online: boolean;
   slots: SimSlot[];
-  timeline: SimClip[];
+  timeline: TL[];
   status: TransportInfo['status'];
   speed: number;
   slotId: number;
@@ -53,7 +56,7 @@ function makeSim(name: string, host: string, online: boolean, slots: SimSlot[], 
     device, online, slots, timeline: [], status: 'stopped', speed: 0, slotId: slots[0]?.id ?? 1, position: 0,
     loop: false, singleClip: false, remote: true, recording: null,
   };
-  sim.timeline = [...(slots[0]?.clips ?? [])];
+  sim.timeline = (slots[0]?.clips ?? []).map(full);
   return sim;
 }
 
@@ -104,7 +107,7 @@ function snapshot(s: Sim): Device {
   if (!s.online) {
     return {
       ...s.device,
-      state: { status: 'connecting', lastError: 'connect ETIMEDOUT', info: null, transport: null, slots: [], disks: {}, timeline: [], remote: null, nasUrl: null },
+      state: { status: 'connecting', lastError: 'connect ETIMEDOUT', info: null, transport: null, slots: [], disks: {}, timeline: [], remote: null, nasUrl: null, edit: [] },
     };
   }
   const at = clipAt(s, s.position);
@@ -118,7 +121,7 @@ function snapshot(s: Sim): Device {
       transport: {
         status: s.status, speed: s.speed, slotId: s.slotId, slotName: slot?.name, deviceName: slot?.name,
         clipId: at?.id ?? null, singleClip: s.singleClip,
-        displayTimecode: s.recording ? tc(s.recording.tcStart + s.recording.frames) : at ? tc(at.clip.tcStart + s.position - at.start) : '00:00:00:00',
+        displayTimecode: s.recording ? tc(s.recording.tcStart + s.recording.frames) : at ? tc(at.clip.src.tcStart + at.clip.in + s.position - at.start) : '00:00:00:00',
         timecode: tc(s.position), videoFormat: '1080p25', loop: s.loop, timeline: s.position, inputVideoFormat: '1080p25', referenceLocked: true,
       },
       slots: s.slots.map((x) => ({
@@ -128,10 +131,11 @@ function snapshot(s: Sim): Device {
       })),
       disks: Object.fromEntries(s.slots.map((x) => [x.id, x.clips.map((c, i) => ({ index: i + 1, name: c.name, fileFormat: c.format, videoFormat: '1080p25', duration: tc(c.frames) }))])),
       timeline: s.timeline.map((c, i) => {
-        const r = { id: i + 1, name: c.name, startTimecode: tc(c.tcStart), duration: tc(c.frames), inTimecode: tc(acc), outTimecode: tc(acc + c.frames) };
+        const r = { id: i + 1, name: c.name, startTimecode: tc(c.src.tcStart), duration: tc(c.src.frames), inTimecode: tc(c.src.tcStart + c.in), outTimecode: tc(c.src.tcStart + c.in + c.frames) };
         acc += c.frames;
         return r;
       }),
+      edit: s.timeline.map((e) => ({ file: e.name, in: e.in, out: e.in + e.frames, frames: e.src.frames })),
       remote: { enabled: s.remote, override: false },
       nasUrl: 'smb://nas.local/Recordings',
     },
@@ -148,17 +152,22 @@ export const devices = () => cache;
 
 // ------------------------------------------------------------------ playback clock
 
+let frac = 0;
 setInterval(() => {
   let dirty = false;
   for (const s of sims) {
     if (!s.online) continue;
     if (s.status === 'record' && s.recording) {
-      s.recording.frames += 5;
+      s.recording.frames += 1;
       dirty = true;
       continue;
     }
     if (s.status !== 'play' && s.status !== 'shuttle' && s.status !== 'forward' && s.status !== 'rewind') continue;
-    s.position += Math.round((s.speed / 100) * (FPS / 5));
+    frac += s.speed / 100;
+    const step = Math.trunc(frac);
+    frac -= step;
+    if (!step) continue;
+    s.position += step;
     const at = clipAt(s, s.position);
     const end = s.singleClip && at ? at.start + at.clip.frames : total(s);
     const start = s.singleClip && at ? at.start : 0;
@@ -169,7 +178,7 @@ setInterval(() => {
     dirty = true;
   }
   if (dirty) rebuild();
-}, 200);
+}, 1000 / FPS);
 
 // ------------------------------------------------------------------ CRUD
 
@@ -234,7 +243,7 @@ export function command(id: string, name: string, p: Record<string, string | num
     case 'stop':
       if (s.status === 'record' && s.recording) {
         s.recording = null;
-        s.timeline = [...s.slots.find((x) => x.id === s.slotId)!.clips];
+        s.timeline = s.slots.find((x) => x.id === s.slotId)!.clips.map(full);
       }
       s.status = 'stopped'; s.speed = 0;
       break;
@@ -261,13 +270,15 @@ export function command(id: string, name: string, p: Record<string, string | num
     case 'slot select': {
       const slot = s.slots.find((x) => x.id === Number(p['slot id']));
       if (!slot) throw new DeckError('102 invalid value');
-      s.slotId = slot.id; s.timeline = [...slot.clips]; s.position = 0; s.status = 'stopped'; s.speed = 0;
+      s.slotId = slot.id; s.timeline = slot.clips.map(full); s.position = 0; s.status = 'stopped'; s.speed = 0;
       break;
     }
     case 'clips add': {
       const f = s.slots.find((x) => x.id === s.slotId)!.clips.find((c) => c.name === p.name);
       if (!f) throw new DeckError('Clip not found on the HyperDeck');
-      s.timeline.push(f);
+      const fi = p['frame in'] !== undefined ? Number(p['frame in']) : 0;
+      const fo = p['frame out'] !== undefined ? Number(p['frame out']) : f.frames;
+      s.timeline.push({ name: f.name, frames: fo - fi, in: fi, src: f });
       break;
     }
     case 'playrange set': case 'playrange clear': case 'identify': case 'play option':
@@ -304,13 +315,35 @@ export function load(id: string, b: { slotId: number; file: string; frame: numbe
   if (s.status === 'record') throw new DeckError('The HyperDeck is recording — stop recording before loading a clip');
   if (s.status === 'preview') command(id, 'preview', { enable: false });
   if (s.slotId !== b.slotId) command(id, 'slot select', { 'slot id': b.slotId });
-  let idx = s.timeline.findIndex((c) => c.name === b.file);
+  const frame = Math.round(b.frame);
+  let idx = s.timeline.findIndex((c) => c.name === b.file && frame >= c.in && frame < c.in + c.frames);
   if (idx < 0) { command(id, 'clips add', { name: b.file }); idx = s.timeline.length - 1; }
   if (!b.play) command(id, 'stop');
   command(id, 'goto', { 'clip id': idx + 1 });
-  if (b.frame > 0) command(id, 'goto', { clip: `+${Math.round(b.frame)}` });
+  const offset = frame - s.timeline[idx].in;
+  if (offset > 0) command(id, 'goto', { clip: `+${offset}` });
   if (b.play) command(id, 'play', b.singleClip ? { 'single clip': true } : {});
   return snapshot(s).state.transport!;
+}
+
+/** Replace the timeline with an edit list, like the server's PUT /edit. */
+export function setEdit(id: string, entries: { file: string; in: number; out: number }[]) {
+  const s = find(id);
+  if (s.status === 'record') throw new DeckError("Can't change the timeline while recording");
+  const slot = s.slots.find((x) => x.id === s.slotId)!;
+  const next = entries.map((e) => {
+    const src = slot.clips.find((c) => c.name === e.file);
+    if (!src) throw new DeckError(`"${e.file}" isn't on the active media. The deck's timeline can only use clips from the selected slot.`);
+    const fi = Math.max(0, Math.floor(e.in));
+    const fo = Math.min(src.frames, Math.floor(e.out));
+    if (fo - fi < 1) throw new DeckError(`${e.file} entry is empty`);
+    return { name: src.name, frames: fo - fi, in: fi, src };
+  });
+  if (['play', 'shuttle', 'forward', 'rewind'].includes(s.status)) { s.status = 'stopped'; s.speed = 0; }
+  s.timeline = next;
+  s.position = Math.min(s.position, Math.max(0, total(s) - 1));
+  rebuild();
+  return snapshot(s).state.edit;
 }
 
 export function clips(id: string) {
@@ -319,7 +352,7 @@ export function clips(id: string) {
   return s.slots.flatMap((slot) => slot.clips.map((c, i) => ({
     slotId: slot.id, slotLabel: slot.volume, isNetwork: Boolean(slot.network), index: i + 1, file: c.name,
     fileFormat: c.format, videoFormat: '1080p25', duration: tc(c.frames), fps: FPS, frames: c.frames,
-    timelineId: s.slotId === slot.id ? (s.timeline.findIndex((t) => t === c) + 1 || null) : null,
+    timelineId: s.slotId === slot.id ? (s.timeline.findIndex((t) => t.src === c) + 1 || null) : null,
   })));
 }
 

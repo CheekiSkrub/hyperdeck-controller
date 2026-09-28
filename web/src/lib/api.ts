@@ -1,4 +1,4 @@
-import type { ClipListing, Device, MediaInfo, ProxyStatus, SourcesTest, StripStatus, TransportInfo } from './types';
+import type { ClipListing, Device, EditEntry, MediaInfo, ProxyStatus, SourcesTest, StripStatus, TransportInfo } from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -26,6 +26,10 @@ export const api = {
 
   command: (id: string, command: string, params?: Record<string, string | number | boolean>) =>
     req<{ code: number; text: string }>('POST', `/api/devices/${id}/command`, { command, params }),
+  setEdit: (id: string, entries: EditEntry[]) => req<EditEntry[]>('PUT', `/api/devices/${id}/edit`, { entries }),
+  originalUrl: (id: string, slot: number, file: string): string | null => `/api/devices/${id}/media/original?${q(slot, file)}`,
+  liveUrl: (id: string, slot: number, file: string, seconds: number): string | null =>
+    `/api/devices/${id}/media/live?${q(slot, file)}&t=${seconds.toFixed(3)}`,
   clips: (id: string) => req<ClipListing[]>('GET', `/api/devices/${id}/clips`),
   load: (id: string, body: { slotId: number; file: string; frame: number; play?: boolean; singleClip?: boolean }) =>
     req<TransportInfo>('POST', `/api/devices/${id}/load`, body),

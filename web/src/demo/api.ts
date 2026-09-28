@@ -1,6 +1,6 @@
 /** Demo replacement for lib/api.ts: same surface, backed by the in-browser simulator. */
 import type { DeviceInput } from '../lib/api';
-import type { ClipListing, Device, MediaInfo, ProxyStatus, SourcesTest, StripStatus, TransportInfo } from '../lib/types';
+import type { ClipListing, Device, EditEntry, MediaInfo, ProxyStatus, SourcesTest, StripStatus, TransportInfo } from '../lib/types';
 import * as sim from './sim';
 import { emitMedia } from './store';
 
@@ -28,6 +28,9 @@ export const api = {
   }, 400),
 
   command: (id: string, command: string, params?: Record<string, string | number | boolean>) => later(() => sim.command(id, command, params), 30),
+  setEdit: (id: string, entries: EditEntry[]) => later(() => sim.setEdit(id, entries), 120),
+  originalUrl: (_id: string, _slot: number, _file: string): string | null => null,
+  liveUrl: (_id: string, _slot: number, _file: string, _seconds: number): string | null => null,
   clips: (id: string) => later((): ClipListing[] => sim.clips(id)),
   load: (id: string, body: { slotId: number; file: string; frame: number; play?: boolean; singleClip?: boolean }) =>
     later((): TransportInfo => sim.load(id, body), 250),

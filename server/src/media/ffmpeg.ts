@@ -190,6 +190,28 @@ export async function makeProxy(
   onProgress(1);
 }
 
+/**
+ * Real-time browser playback of any codec: transcode from `seconds` onward to
+ * fragmented MP4 (H.264 + AAC) on stdout. Fragmented output can be played by a
+ * <video> element while it's still being written. The caller pipes stdout to
+ * the HTTP response and kills the process when the viewer disconnects.
+ */
+export function spawnLive(input: string, seconds: number, height: number) {
+  const args = [
+    '-hide_banner', '-loglevel', 'error', ...inputOptions(input),
+    ...(seconds > 0 ? ['-ss', seconds.toFixed(3)] : []),
+    '-i', input,
+    '-map', '0:v:0', '-map', '0:a:0?',
+    '-vf', `scale=-2:${height},format=yuv420p`,
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-g', '25', '-bf', '0',
+    '-c:a', 'aac', '-ac', '2', '-b:a', '128k',
+    '-avoid_negative_ts', 'make_zero',
+    '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-frag_duration', '400000',
+    'pipe:1',
+  ];
+  return spawn(ffmpegBin, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+}
+
 export function ffmpegPaths() {
   return { ffmpeg: ffmpegBin, ffprobe: ffprobeBin };
 }

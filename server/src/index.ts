@@ -41,6 +41,7 @@ async function main() {
     for (const ws of sockets) if (ws.readyState === 1) ws.send(s);
   };
   devices.on('state', (id: string, state) => broadcast({ type: 'state', id, state }));
+  devices.on('transport', (id: string, transport) => broadcast({ type: 'transport', id, transport }));
   devices.on('devices', () => broadcast({ type: 'devices', devices: devices.list() }));
   media.on('strip', (e) => broadcast({ type: 'strip', ...e }));
   media.on('proxy', (e) => broadcast({ type: 'proxy', ...e }));

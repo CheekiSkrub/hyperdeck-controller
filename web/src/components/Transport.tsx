@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Device } from '../lib/types';
+import { LiveTimecode } from './LiveTimecode';
 import { StatusBadge } from './StatusBadge';
 
 type Send = (command: string, params?: Record<string, string | number | boolean>) => Promise<void>;
@@ -63,7 +64,7 @@ export function Transport({ device, send }: { device: Device; send: Send }) {
   return (
     <section className={`card transport ${recording ? 'is-recording' : ''}`}>
       <div className="tc-block">
-        <div className="tc mono" aria-label="Timecode">{t.displayTimecode}</div>
+        <LiveTimecode transport={t} className="tc mono" />
         <div className="tc-meta">
           <StatusBadge status={t.status} />
           {t.speed !== 0 && t.speed !== 100 && <span className="badge">{(t.speed / 100).toFixed(t.speed % 100 ? 1 : 0)}×</span>}

@@ -44,6 +44,9 @@ function connect() {
     } else if (msg.type === 'state') {
       devices = devices.map((d) => (d.id === msg.id ? { ...d, state: msg.state as DeviceState } : d));
       emit();
+    } else if (msg.type === 'transport') {
+      devices = devices.map((d) => (d.id === msg.id ? { ...d, state: { ...d.state, transport: msg.transport } } : d));
+      emit();
     } else if (msg.type === 'strip' || msg.type === 'proxy') {
       for (const l of mediaListeners) l(msg);
     }

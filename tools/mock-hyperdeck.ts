@@ -23,7 +23,8 @@ const FTP_PORT = Number(process.env.MOCK_FTP_PORT ?? 2121);
 const HOST = process.env.MOCK_HOST ?? '0.0.0.0';
 const FPS = 25;
 
-interface MockFile { name: string; frames: number; format: string }
+interface MockFile { name: string; frames: number; format: string; tcStart: number }
+interface Entry { name: string; frames: number; in: number; file: MockFile }
 const slots: Record<number, { dir: string; name: string; files: MockFile[] }> = {
   1: { dir: path.join(FTP_ROOT, 'ssd1'), name: 'ssd1', files: [] },
   2: { dir: path.join(FTP_ROOT, 'ssd2'), name: 'ssd2', files: [] },
@@ -54,8 +55,12 @@ function prepareMedia() {
   makeClip(slots[3].dir, 'NAS Record_0001.mov', 18, '12:00:00:00', 'testsrc', 'prores');
   for (const s of Object.values(slots)) {
     s.files = fs.readdirSync(s.dir).filter((f) => /\.(mov|mp4)$/.test(f)).sort().map((f) => {
-      const d = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path.join(s.dir, f)]).toString().trim());
-      return { name: f, frames: Math.round(d * FPS), format: f.endsWith('.mp4') ? 'H.264High' : 'QuickTimeProRes' };
+      const full = path.join(s.dir, f);
+      const d = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', full]).toString().trim());
+      const tcTag = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream_tags=timecode:format_tags=timecode', '-of', 'default=nw=1:nk=1', full]).toString().trim().split('\n')[0] ?? '';
+      const m = /(\d+):(\d+):(\d+)[:;](\d+)/.exec(tcTag);
+      const tcStart = m ? ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * FPS + Number(m[4]) : 0;
+      return { name: f, frames: Math.round(d * FPS), format: f.endsWith('.mp4') ? 'H.264High' : 'QuickTimeProRes', tcStart };
     });
   }
 }
@@ -74,10 +79,11 @@ const deck = {
   position: 0, // timeline frame
   loop: false,
   singleClip: false,
-  timeline: [] as MockFile[],
+  timeline: [] as Entry[],
   remote: true,
 };
-const rebuildTimeline = () => { deck.timeline = [...slots[deck.slotId].files]; deck.position = 0; };
+const fullEntry = (f: MockFile): Entry => ({ name: f.name, frames: f.frames, in: 0, file: f });
+const rebuildTimeline = () => { deck.timeline = slots[deck.slotId].files.map(fullEntry); deck.position = 0; };
 
 function clipAt(pos: number) {
   let start = 0;
@@ -108,18 +114,22 @@ function notify(kind: string, code: number, title: string, lines: string[]) {
 }
 const pushTransport = () => notify('transport', 508, 'transport info', transportLines());
 
+// Advance one frame per tick, like a real deck, sending display timecode each frame.
+let frac = 0;
 setInterval(() => {
-  if (deck.status !== 'play' && deck.status !== 'shuttle' && deck.status !== 'record') return;
-  if (deck.status === 'record') return;
-  const step = Math.round((deck.speed / 100) * (FPS / 5));
+  if (deck.status !== 'play' && deck.status !== 'shuttle') return;
+  frac += deck.speed / 100;
+  const step = Math.trunc(frac);
+  frac -= step;
+  if (!step) return;
   deck.position += step;
   if (deck.position >= totalFrames() || deck.position < 0) {
     if (deck.loop) deck.position = 0;
-    else { deck.position = Math.max(0, Math.min(deck.position, totalFrames() - 1)); deck.status = 'stopped'; deck.speed = 0; }
+    else { deck.position = Math.max(0, Math.min(deck.position, totalFrames() - 1)); deck.status = 'stopped'; deck.speed = 0; pushTransport(); }
   }
   notify('display timecode', 515, 'display timecode info', [`display timecode: ${tc(deck.position)}`]);
-  pushTransport();
-}, 200);
+  notify('timeline position', 516, 'timeline position info', [`timeline: ${deck.position}`]);
+}, 1000 / FPS);
 
 // ---------------------------------------------------------------- command handling
 function parse(line: string): { name: string; params: Record<string, string> } {
@@ -138,7 +148,7 @@ function handle(sock: net.Socket, line: string): string {
   const { name, params } = parse(line);
   const ok = '200 ok\r\n';
   const block = (code: number, title: string, lines: string[]) => `${code} ${title}:\r\n${lines.join('\r\n')}\r\n\r\n`;
-  const needRemote = ['play', 'stop', 'record', 'goto', 'jog', 'shuttle', 'slot select', 'preview', 'clips add', 'clips clear'];
+  const needRemote = ['play', 'stop', 'record', 'goto', 'jog', 'shuttle', 'slot select', 'preview', 'clips add', 'clips remove', 'clips clear'];
   if (needRemote.includes(name) && !deck.remote) return '111 remote control disabled\r\n';
 
   switch (name) {
@@ -174,7 +184,7 @@ function handle(sock: net.Socket, line: string): string {
       const lines = deck.timeline.map((c, i) => {
         const l = v === '1'
           ? `${i + 1}: ${c.name} ${tc(start)} ${tc(c.frames)}`
-          : `${i + 1}: ${tc(0)} ${tc(c.frames)} ${tc(start)} ${tc(start + c.frames)} ${c.name}`;
+          : `${i + 1}: ${tc(c.file.tcStart)} ${tc(c.file.frames)} ${tc(c.file.tcStart + c.in)} ${tc(c.file.tcStart + c.in + c.frames)} ${c.name}`;
         start += c.frames;
         return l;
       });
@@ -183,11 +193,27 @@ function handle(sock: net.Socket, line: string): string {
     case 'clips add': {
       const f = slots[deck.slotId].files.find((x) => x.name === params.name);
       if (!f) return '112 clip not found\r\n';
-      deck.timeline.push(f);
+      let entry = fullEntry(f);
+      if (params['frame in'] !== undefined && params['frame out'] !== undefined) {
+        const fi = Number(params['frame in']);
+        const fo = Number(params['frame out']);
+        if (!(fi >= 0 && fo > fi && fo <= f.frames)) return '109 out of range\r\n';
+        entry = { name: f.name, frames: fo - fi, in: fi, file: f };
+      }
+      if (params['clip id'] !== undefined) deck.timeline.splice(Number(params['clip id']) - 1, 0, entry);
+      else deck.timeline.push(entry);
       notify('clips', 512, 'clips info', ['clip count: ' + deck.timeline.length]);
       return ok;
     }
-    case 'clips clear': deck.timeline = []; deck.position = 0; return ok;
+    case 'clips remove': {
+      const id = Number(params['clip id']);
+      if (!(id >= 1 && id <= deck.timeline.length)) return '109 out of range\r\n';
+      deck.timeline.splice(id - 1, 1);
+      deck.position = Math.min(deck.position, Math.max(0, totalFrames() - 1));
+      notify('clips', 512, 'clips info', ['clip count: ' + deck.timeline.length]);
+      return ok;
+    }
+    case 'clips clear': deck.timeline = []; deck.position = 0; notify('clips', 512, 'clips info', ['clip count: 0']); return ok;
     case 'slot select': {
       const id = Number(params['slot id']);
       if (!slots[id]) return '102 invalid value\r\n';

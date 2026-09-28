@@ -49,6 +49,19 @@ export interface DeviceState {
   timeline: TimelineClip[];
   remote: { enabled: boolean; override: boolean } | null;
   nasUrl: string | null;
+  /** The deck's timeline as an edit list. */
+  edit: EditEntry[];
+}
+
+/** One timeline entry: frames [in, out) of a file on the active slot. */
+export interface EditEntry {
+  file: string;
+  in: number;
+  out: number;
+  /** Total frames in the file. */
+  frames: number;
+  /** Deck didn't report enough to know the exact in point. */
+  approx?: boolean;
 }
 
 export interface ShareMapping {

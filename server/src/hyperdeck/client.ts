@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import net from 'node:net';
+import { editFromState, type DerivedEntry } from '../devices/edit.js';
 import {
   buildCommand, parseClipsGet, parseDiskList, parseSlotInfo, parseTransportInfo, ResponseParser,
   type DiskClip, type HyperDeckResponse, type SlotInfo, type TimelineClip, type TransportInfo,
@@ -37,6 +38,8 @@ export interface HyperDeckState {
   remote: { enabled: boolean; override: boolean } | null;
   /** URL of the currently selected network storage, if any. */
   nasUrl: string | null;
+  /** The timeline as an edit list (file + frame in/out per entry). */
+  edit: DerivedEntry[];
 }
 
 interface Pending {
@@ -61,9 +64,11 @@ export class HyperDeckClient extends EventEmitter {
   private backoff = 1000;
   private closed = false;
   private stateTimer: NodeJS.Timeout | null = null;
+  private transportTimer: NodeJS.Timeout | null = null;
+  private lastTransportEmit = 0;
 
   readonly state: HyperDeckState = {
-    status: 'disconnected', info: null, transport: null, slots: [], disks: {}, timeline: [], remote: null, nasUrl: null,
+    status: 'disconnected', info: null, transport: null, slots: [], disks: {}, timeline: [], remote: null, nasUrl: null, edit: [],
   };
 
   constructor(public host: string, public port = HYPERDECK_PORT) {
@@ -201,6 +206,9 @@ export class HyperDeckClient extends EventEmitter {
   }
 
   private onAsync(r: HyperDeckResponse): void {
+    // Transport/timecode notifications arrive up to once per frame; they go out
+    // on a lightweight fast path instead of the full (debounced) state.
+    const fast = r.code === 508 || r.code === 515 || r.code === 516;
     switch (r.code) {
       case 502: {
         const id = Number(r.params['slot id']);
@@ -232,7 +240,20 @@ export class HyperDeckClient extends EventEmitter {
       default:
         break;
     }
-    this.emitState();
+    if (fast) this.emitTransport();
+    else this.emitState();
+  }
+
+  /** Emit transport immediately, at most once per ~frame (15 ms), always sending the latest. */
+  private emitTransport(): void {
+    const now = Date.now();
+    const send = () => {
+      this.transportTimer = null;
+      this.lastTransportEmit = Date.now();
+      this.emit('transport', this.state.transport);
+    };
+    if (now - this.lastTransportEmit >= 15) send();
+    else if (!this.transportTimer) this.transportTimer = setTimeout(send, 15 - (now - this.lastTransportEmit));
   }
 
   private async initialise(): Promise<void> {
@@ -316,6 +337,7 @@ export class HyperDeckClient extends EventEmitter {
       r = await this.send('clips get', undefined, 10000);
     }
     this.state.timeline = parseClipsGet(r.lines);
+    this.state.edit = editFromState(this.state, this);
     this.emitState();
   }
 
@@ -332,11 +354,12 @@ export class HyperDeckClient extends EventEmitter {
 
   private emitState(): void {
     if (this.stateTimer) return;
-    // Coalesce bursts of notifications (e.g. during play) to ~20 updates/sec.
+    // Coalesce bursts of slot/clip/disk notifications.
     this.stateTimer = setTimeout(() => {
       this.stateTimer = null;
+      this.state.edit = editFromState(this.state, this);
       this.emit('state', this.state);
-    }, 50);
+    }, 100);
   }
 
   private setStatus(s: ConnectionStatus) {

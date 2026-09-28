@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { HyperDeckClient, HyperDeckError, type HyperDeckState } from '../hyperdeck/client.js';
 import { fpsFromVideoFormat, timecodeToFrames, type TransportInfo } from '../hyperdeck/protocol.js';
+import { applyEdit, EditError, validateEdit, type DerivedEntry } from './edit.js';
 import type { Device, DeviceInput, DeviceStore } from './store.js';
 
 export interface ClipListing {
@@ -95,6 +96,7 @@ export class DeviceManager extends EventEmitter {
   private attach(d: Device) {
     const c = new HyperDeckClient(d.host, d.port);
     c.on('state', (state: HyperDeckState) => this.emit('state', d.id, state));
+    c.on('transport', (t: TransportInfo | null) => this.emit('transport', d.id, t));
     this.clients.set(d.id, c);
     c.connect();
   }
@@ -143,6 +145,19 @@ export class DeviceManager extends EventEmitter {
     return out;
   }
 
+  /** Replace the deck's timeline with an edit list (drag/drop, remove, split, reorder). */
+  async setEdit(id: string, entries: unknown): Promise<DerivedEntry[]> {
+    const c = this.client(id);
+    if (c.state.status !== 'connected') throw new CommandError('HyperDeck not connected', 409);
+    try {
+      await applyEdit(c, validateEdit(entries, c.state));
+      return c.state.edit;
+    } catch (e) {
+      if (e instanceof EditError) throw new CommandError(e.message, 409);
+      throw toCommandError(e);
+    }
+  }
+
   /**
    * Cue a file on the HyperDeck at an exact frame:
    *  1. select the slot the file is on (rebuilds the timeline from that media)
@@ -164,18 +179,26 @@ export class DeviceManager extends EventEmitter {
         await sleep(300); // deck rebuilds the timeline after a slot change
       }
       await c.refreshTimeline();
-      let clip = findTimelineClip(c.state, opts.file);
-      if (!clip) {
+      const frame = Math.max(0, Math.round(opts.frame));
+      // Find a timeline entry of this file that contains the frame (entries may be slices).
+      const find = () => {
+        const want = stripExt(opts.file);
+        const i = c.state.edit.findIndex((e) => stripExt(e.file) === want && frame >= e.in && frame < e.out);
+        return i >= 0 ? { id: i + 1, entry: c.state.edit[i] } : null;
+      };
+      let hit = find();
+      if (!hit) {
         await c.send('clips add', { name: opts.file });
         await c.refreshTimeline();
-        clip = findTimelineClip(c.state, opts.file);
+        hit = find();
       }
-      if (!clip) throw new CommandError(`"${opts.file}" is not on the HyperDeck timeline and could not be added`, 404);
+      if (!hit) throw new CommandError(`"${opts.file}" is not on the HyperDeck timeline and could not be added`, 404);
+      const clip = { id: hit.id };
 
       if (c.state.transport?.status !== 'stopped' && !opts.play) await c.send('stop');
       await c.send('goto', { 'clip id': clip.id });
-      const frame = Math.max(0, Math.round(opts.frame));
-      if (frame > 0) await c.send('goto', { clip: `+${frame}` });
+      const offset = frame - hit.entry.in;
+      if (offset > 0) await c.send('goto', { clip: `+${offset}` });
 
       if (opts.singleClip) await c.send('playrange set', { 'clip id': clip.id }).catch(() => {});
       if (opts.play) await c.send('play', opts.singleClip ? { 'single clip': true } : undefined);

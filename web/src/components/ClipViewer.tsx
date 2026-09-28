@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import type { Editor } from '../lib/editor';
 import { useMediaEvents } from '../lib/store';
 import { framesToTc, tcToFrames } from '../lib/tc';
 import type { ClipListing, Device, MediaInfo, ProxyStatus, StripStatus } from '../lib/types';
@@ -12,17 +13,28 @@ import { Modal } from './Modal';
  * frame is fetched (debounced) and swapped in. If an H.264 proxy exists the
  * preview switches to a <video> element for smooth scrubbing and playback.
  */
-export function ClipViewer({ device, clip, onClose, notify }: {
+export function ClipViewer({ device, clip, onClose, notify, editor, startFrame, editIndex = null }: {
   device: Device;
   clip: ClipListing;
   onClose: () => void;
   notify: (m: string, kind?: 'ok' | 'err') => void;
+  editor: Editor;
+  /** Open at this frame (e.g. from a timeline entry). */
+  startFrame?: number;
+  /** When opened from the timeline: the entry being edited. */
+  editIndex?: number | null;
 }) {
+  const editing = editIndex !== null ? editor.entries[editIndex] : null;
   const [info, setInfo] = useState<MediaInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [strip, setStrip] = useState<StripStatus | null>(null);
   const [tileVersion, setTileVersion] = useState(0);
-  const [frame, setFrame] = useState(0);
+  const [frame, setFrame] = useState(startFrame ?? editing?.in ?? 0);
+  const [markIn, setMarkIn] = useState<number | null>(editing && editing.in > 0 ? editing.in : null);
+  const [markOut, setMarkOut] = useState<number | null>(editing && editing.out < editing.frames ? editing.out - 1 : null);
+  /** Live-transcode playback started at this frame (null = not in live mode). */
+  const [live, setLive] = useState<number | null>(null);
+  const [directFailed, setDirectFailed] = useState(false);
   const [exact, setExact] = useState<{ frame: number; url: string } | null>(null);
   const [loadingExact, setLoadingExact] = useState(false);
   const [proxy, setProxy] = useState<ProxyStatus | null>(null);
@@ -40,6 +52,20 @@ export function ClipViewer({ device, clip, onClose, notify }: {
   // Proxies are H.264; every mainstream browser decodes it, but some Linux Chromium builds don't.
   const canPlayProxy = useMemo(() => Boolean(document.createElement('video').canPlayType('video/mp4; codecs="avc1.640028"')), []);
   const proxyReady = proxy?.state === 'ready' && useProxy && canPlayProxy;
+
+  // Play the original file directly when the browser can decode it (H.264/H.265;
+  // ProRes in Safari). From a network share this is just a fast ranged file read.
+  const directOk = useMemo(() => {
+    const codec = info?.probe.codec;
+    const type = codec === 'h264' ? 'video/mp4; codecs="avc1.640028"'
+      : codec === 'hevc' ? 'video/mp4; codecs="hvc1.1.6.L123.B0"'
+        : codec === 'prores' ? 'video/quicktime; codecs="apch"' : null;
+    return Boolean(type && document.createElement('video').canPlayType(type));
+  }, [info?.probe.codec]);
+  const originalUrl = api.originalUrl(device.id, clip.slotId, clip.file);
+  const smoothSrc = proxyReady ? api.proxyUrl(proxy!.key) : directOk && !directFailed && originalUrl ? originalUrl : null;
+  const smoothKind = proxyReady ? 'proxy' : smoothSrc ? 'original' : null;
+  const liveAvailable = !smoothSrc && api.liveUrl(device.id, clip.slotId, clip.file, 0) !== null;
 
   // ------------------------------------------------------------------ load media info + filmstrip
   useEffect(() => {
@@ -80,7 +106,7 @@ export function ClipViewer({ device, clip, onClose, notify }: {
   }, [info]);
 
   useEffect(() => {
-    if (!info || proxyReady) return;
+    if (!info || smoothSrc || live !== null) return;
     const delay = dragging.current ? 140 : 0;
     const timer = setTimeout(() => {
       const url = api.frameUrl(device.id, clip.slotId, clip.file, frame, exactHeight);
@@ -94,27 +120,33 @@ export function ClipViewer({ device, clip, onClose, notify }: {
       img.src = url;
     }, delay);
     return () => clearTimeout(timer);
-  }, [frame, info, proxyReady, exactHeight]);
+  }, [frame, info, smoothSrc, live, exactHeight]);
 
   // ------------------------------------------------------------------ video mode sync
   useEffect(() => {
     const v = video.current;
-    if (!v || !proxyReady || videoPlaying) return;
+    if (!v || !smoothSrc || videoPlaying) return;
     const target = (frame + 0.1) / fps;
     if (Math.abs(v.currentTime - target) > 0.5 / fps) v.currentTime = target;
-  }, [frame, proxyReady, videoPlaying, fps]);
+  }, [frame, smoothSrc, videoPlaying, fps]);
 
   useEffect(() => {
     const v = video.current;
     if (!v || !videoPlaying) return;
     let raf = 0;
     const tick = () => {
-      setFrame(Math.min(frames - 1, Math.floor(v.currentTime * fps)));
+      setFrame(Math.min(frames - 1, (live ?? 0) + Math.floor(v.currentTime * fps)));
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [videoPlaying, fps, frames]);
+  }, [videoPlaying, fps, frames, live]);
+
+  /** Any manual seek leaves live-transcode mode and goes back to exact stills. */
+  const seek = useCallback((f: number) => {
+    if (live !== null) { setLive(null); setVideoPlaying(false); }
+    setFrame(Math.min(frames - 1, Math.max(0, f)));
+  }, [live, frames]);
 
   // ------------------------------------------------------------------ scrubbing
   const frameFromX = (clientX: number) => {
@@ -126,21 +158,39 @@ export function ClipViewer({ device, clip, onClose, notify }: {
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     dragging.current = true;
     video.current?.pause();
-    setFrame(frameFromX(e.clientX));
+    seek(frameFromX(e.clientX));
   };
   const onPointerMove = (e: React.PointerEvent) => {
-    if (dragging.current) setFrame(frameFromX(e.clientX));
+    if (dragging.current) seek(frameFromX(e.clientX));
   };
   const onPointerUp = (e: React.PointerEvent) => {
     if (!dragging.current) return;
     dragging.current = false;
-    setFrame(frameFromX(e.clientX));
+    seek(frameFromX(e.clientX));
   };
 
   const step = useCallback((n: number) => {
     video.current?.pause();
-    setFrame((f) => Math.min(frames - 1, Math.max(0, f + n)));
-  }, [frames]);
+    seek(frame + n);
+  }, [seek, frame]);
+
+  // ------------------------------------------------------------------ in/out marks → timeline
+  const onActiveSlot = device.state.transport?.slotId === clip.slotId;
+  const entryFrames = clip.frames ?? frames;
+  const sliceIn = markIn ?? 0;
+  const sliceOut = Math.min(entryFrames, (markOut ?? entryFrames - 1) + 1);
+  const addToTimeline = useCallback(async (replace: boolean) => {
+    if (!onActiveSlot) {
+      notify(`The deck's timeline uses the active media. Select ${clip.slotLabel} on the deck first.`);
+      return;
+    }
+    if (sliceOut - sliceIn < 1) return notify('Out point must be after the in point');
+    const entry = { file: clip.file, in: sliceIn, out: sliceOut, frames: entryFrames };
+    const ok = replace && editIndex !== null
+      ? await editor.commit(editor.entries.map((e, i) => (i === editIndex ? entry : e)))
+      : await editor.append(entry);
+    if (ok) notify(`${replace ? 'Updated' : 'Added'} ${clip.file} ${framesToTc(sliceIn, fps)}–${framesToTc(sliceOut, fps)} ${replace ? 'on' : 'to'} the timeline`, 'ok');
+  }, [onActiveSlot, sliceIn, sliceOut, entryFrames, editIndex, editor, clip, fps, notify]);
 
   // ------------------------------------------------------------------ cue on the HyperDeck
   const cue = useCallback(async (play: boolean) => {
@@ -161,10 +211,13 @@ export function ClipViewer({ device, clip, onClose, notify }: {
       const big = Math.round(fps);
       if (e.key === 'ArrowLeft') { e.preventDefault(); step(e.shiftKey ? -big : -1); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); step(e.shiftKey ? big : 1); }
-      else if (e.key === 'Home') { e.preventDefault(); setFrame(0); }
-      else if (e.key === 'End') { e.preventDefault(); setFrame(frames - 1); }
+      else if (e.key === 'Home') { e.preventDefault(); seek(0); }
+      else if (e.key === 'End') { e.preventDefault(); seek(frames - 1); }
       else if (e.key === 'Enter') { e.preventDefault(); void cue(e.shiftKey); }
-      else if (e.code === 'Space' && proxyReady) { e.preventDefault(); togglePlay(); }
+      else if (e.code === 'Space' && (smoothSrc || liveAvailable || live !== null)) { e.preventDefault(); togglePlay(); }
+      else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); setMarkIn(frame); if (markOut !== null && markOut < frame) setMarkOut(null); }
+      else if (e.key === 'o' || e.key === 'O') { e.preventDefault(); setMarkOut(frame); if (markIn !== null && markIn > frame) setMarkIn(null); }
+      else if (e.key === 'x' || e.key === 'X') { e.preventDefault(); setMarkIn(null); setMarkOut(null); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -172,6 +225,11 @@ export function ClipViewer({ device, clip, onClose, notify }: {
 
   const togglePlay = () => {
     const v = video.current;
+    if (!smoothSrc && live === null) {
+      // Start a live transcode from the current frame (ProRes/DNx in Chrome etc.).
+      if (liveAvailable) setLive(frame);
+      return;
+    }
     if (!v) return;
     if (v.paused) { void v.play(); } else v.pause();
   };
@@ -206,16 +264,32 @@ export function ClipViewer({ device, clip, onClose, notify }: {
       ) : (
         <div className="viewer">
           <div className="stage" ref={stage}>
-            {proxyReady ? (
+            {smoothSrc ? (
               <video
+                key={smoothSrc}
                 ref={video}
-                src={api.proxyUrl(proxy!.key)}
+                src={smoothSrc}
                 preload="auto"
                 playsInline
                 onPlay={() => setVideoPlaying(true)}
                 onPause={() => setVideoPlaying(false)}
                 onLoadedMetadata={(e) => { e.currentTarget.currentTime = (frame + 0.1) / fps; }}
-                onError={() => { setUseProxy(false); notify('This browser could not play the proxy — using frame-accurate stills instead'); }}
+                onError={() => {
+                  if (smoothKind === 'proxy') { setUseProxy(false); notify('This browser could not play the proxy — using frame-accurate stills instead'); }
+                  else { setDirectFailed(true); notify("This browser couldn't play the original file — use ▶ for a live preview"); }
+                }}
+              />
+            ) : live !== null ? (
+              <video
+                key={`live-${live}`}
+                ref={video}
+                src={api.liveUrl(device.id, clip.slotId, clip.file, live / fps)!}
+                autoPlay
+                playsInline
+                onPlay={() => setVideoPlaying(true)}
+                onPause={() => setVideoPlaying(false)}
+                onEnded={() => setVideoPlaying(false)}
+                onError={() => { setLive(null); setVideoPlaying(false); notify('Live preview failed — is ffmpeg available on the server?'); }}
               />
             ) : (
               <>
@@ -247,6 +321,12 @@ export function ClipViewer({ device, clip, onClose, notify }: {
                 </div>
               ))}
             </div>
+            {(markIn !== null || markOut !== null) && (
+              <div className="scrub-range" style={{
+                left: `${(sliceIn / Math.max(1, frames - 1)) * 100}%`,
+                width: `${(Math.max(1, Math.min(frames, sliceOut) - sliceIn) / Math.max(1, frames - 1)) * 100}%`,
+              }} />
+            )}
             <div className="scrub-head" style={{ left: `${(frame / Math.max(1, frames - 1)) * 100}%` }} />
           </div>
 
@@ -257,13 +337,40 @@ export function ClipViewer({ device, clip, onClose, notify }: {
               <div><span className="muted small">Frame</span> <span className="mono">{frame} / {frames - 1}</span></div>
             </div>
             <div className="step-buttons">
-              <button className="btn small" onClick={() => setFrame(0)} title="First frame (Home)">|◂</button>
+              <button className="btn small" onClick={() => seek(0)} title="First frame (Home)">|◂</button>
               <button className="btn small" onClick={() => step(-Math.round(fps))} title="Back 1 second (Shift+←)">−1s</button>
               <button className="btn small" onClick={() => step(-1)} title="Back 1 frame (←)">−1f</button>
-              {proxyReady && <button className="btn small" onClick={togglePlay} title="Play proxy (Space)">{videoPlaying ? '❚❚' : '▶'}</button>}
+              {(smoothSrc || liveAvailable || live !== null) && (
+                <button className="btn small play-btn" onClick={togglePlay}
+                  title={smoothSrc ? `Play ${smoothKind === 'proxy' ? 'proxy' : 'original file'} in the browser (Space)` : 'Play a live preview transcoded by the server (Space)'}>
+                  {videoPlaying ? '❚❚' : '▶'}
+                </button>
+              )}
               <button className="btn small" onClick={() => step(1)} title="Forward 1 frame (→)">+1f</button>
               <button className="btn small" onClick={() => step(Math.round(fps))} title="Forward 1 second (Shift+→)">+1s</button>
-              <button className="btn small" onClick={() => setFrame(frames - 1)} title="Last frame (End)">▸|</button>
+              <button className="btn small" onClick={() => seek(frames - 1)} title="Last frame (End)">▸|</button>
+            </div>
+          </div>
+
+          <div className="viewer-controls marks">
+            <div className="step-buttons">
+              <button className="btn small" onClick={() => { setMarkIn(frame); if (markOut !== null && markOut < frame) setMarkOut(null); }} title="Mark in (I)">Mark in</button>
+              <button className="btn small" onClick={() => { setMarkOut(frame); if (markIn !== null && markIn > frame) setMarkIn(null); }} title="Mark out (O)">Mark out</button>
+              {(markIn !== null || markOut !== null) && <button className="btn small ghost" onClick={() => { setMarkIn(null); setMarkOut(null); }} title="Clear marks (X)">Clear</button>}
+              <span className="mono small muted">
+                {markIn !== null || markOut !== null
+                  ? `In ${framesToTc(sliceIn, fps)} · Out ${framesToTc(sliceOut, fps)} · ${framesToTc(sliceOut - sliceIn, fps)}`
+                  : 'No marks: the whole clip'}
+              </span>
+            </div>
+            <div className="cue-buttons">
+              {editIndex !== null && editing && (
+                <button className="btn" onClick={() => addToTimeline(true)} disabled={editor.busy} title="Replace the timeline entry you opened with these marks">Update timeline entry</button>
+              )}
+              <button className="btn" onClick={() => addToTimeline(false)} disabled={editor.busy}
+                title={onActiveSlot ? 'Append this clip (or the marked section) to the deck timeline' : `Timeline uses the active media; select ${clip.slotLabel} first`}>
+                + Add {markIn !== null || markOut !== null ? 'section' : 'clip'} to timeline
+              </button>
             </div>
             <div className="cue-buttons">
               <label className="check small"><input type="checkbox" checked={singleClip} onChange={(e) => setSingleClip(e.target.checked)} /> Play this clip only</label>
@@ -284,6 +391,8 @@ export function ClipViewer({ device, clip, onClose, notify }: {
               </span>
             )}
             {strip && !strip.done && <span> · filmstrip {readyCount}/{strip.count}</span>}
+            {smoothKind === 'original' && <span> · plays the original file</span>}
+            {live !== null && <span> · live preview (transcoding)</span>}
             <span className="spacer" />
             {proxy?.state === 'ready' && !canPlayProxy ? (
               <span>Proxy ready, but this browser can't play H.264</span>

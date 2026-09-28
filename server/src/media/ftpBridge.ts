@@ -72,7 +72,7 @@ export class FtpBridge {
         const headers: Record<string, string | number> = {
           'Accept-Ranges': 'bytes',
           'Content-Length': length,
-          'Content-Type': 'application/octet-stream',
+          'Content-Type': /\.(mov|mp4|m4v)$/i.test(remotePath) ? 'video/mp4' : 'application/octet-stream',
         };
         if (req.query.download) {
           const name = remotePath.split('/').pop() ?? 'clip';

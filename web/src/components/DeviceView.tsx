@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import type { ClipListing, Device } from '../lib/types';
+import { useEditor } from '../lib/editor';
+import { fpsFromFormat, framesToTc } from '../lib/tc';
+import type { ClipListing, Device, EditEntry } from '../lib/types';
 import { ClipBrowser } from './ClipBrowser';
 import { ClipViewer } from './ClipViewer';
 import { Slots } from './Slots';
-import { Timeline } from './Timeline';
+import { EditTimeline } from './EditTimeline';
 import { Transport } from './Transport';
 
 export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => void }) {
   const s = device.state;
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
-  const [viewing, setViewing] = useState<ClipListing | null>(null);
+  const [viewing, setViewing] = useState<{ clip: ClipListing; startFrame?: number; editIndex?: number } | null>(null);
 
   const notify = useCallback((text: string, kind: 'ok' | 'err' = 'err') => {
     setToast({ text, kind });
@@ -31,6 +33,33 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
   }, [device.id, notify]);
 
   const connected = s.status === 'connected';
+  const editor = useEditor(device, notify);
+
+  /** Open a timeline entry in the viewer, with its in/out as marks. */
+  const openEntry = (e: EditEntry, index: number) => {
+    const slotId = s.transport?.slotId;
+    if (!slotId) return;
+    const slot = s.slots.find((x) => x.slotId === slotId);
+    const disk = s.disks[slotId]?.find((d) => d.name === e.file);
+    const fps = fpsFromFormat(s.transport?.videoFormat) ?? 25;
+    setViewing({
+      clip: {
+        slotId,
+        slotLabel: slot?.volumeName || slot?.slotName || `Slot ${slotId}`,
+        isNetwork: /nas|network|smb/i.test(`${slot?.slotName} ${slot?.deviceName}`),
+        index: disk?.index ?? 0,
+        file: e.file,
+        fileFormat: disk?.fileFormat ?? '',
+        videoFormat: disk?.videoFormat ?? s.transport?.videoFormat ?? '',
+        duration: disk?.duration ?? framesToTc(e.frames, fps),
+        fps,
+        frames: e.frames,
+        timelineId: index + 1,
+      },
+      startFrame: e.in,
+      editIndex: index,
+    });
+  };
 
   return (
     <div className="device-view">
@@ -66,14 +95,25 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
       {connected && s.transport && (
         <>
           <Transport device={device} send={send} />
-          <Timeline device={device} send={send} />
+          <EditTimeline device={device} editor={editor} send={send} notify={notify} onOpen={openEntry} />
           <Slots device={device} send={send} />
         </>
       )}
 
-      <ClipBrowser device={device} onOpen={setViewing} notify={notify} />
+      <ClipBrowser device={device} onOpen={(clip) => setViewing({ clip })} notify={notify} />
 
-      {viewing && <ClipViewer device={device} clip={viewing} onClose={() => setViewing(null)} notify={notify} />}
+      {viewing && (
+        <ClipViewer
+          key={`${viewing.clip.slotId}/${viewing.clip.file}/${viewing.editIndex ?? ''}`}
+          device={device}
+          clip={viewing.clip}
+          startFrame={viewing.startFrame}
+          editIndex={viewing.editIndex ?? null}
+          editor={editor}
+          onClose={() => setViewing(null)}
+          notify={notify}
+        />
+      )}
 
       {toast && <div className={`toast ${toast.kind}`} role="status">{toast.text}</div>}
     </div>
