@@ -161,6 +161,15 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
   const pos = Math.max(0, Math.min(Math.max(0, total - 1), scrubbing ?? livePos));
   const lastScrubSent = useRef(0);
 
+  // Which clip the playhead is over, and how much time is left in it and in the whole timeline —
+  // shown as countdowns next to the elapsed timecode, the way an NLE does.
+  const currentClipIndex = useMemo(() => {
+    for (let i = starts.length - 1; i >= 0; i--) if (pos >= starts[i]) return i;
+    return -1;
+  }, [starts, pos]);
+  const clipRemaining = currentClipIndex >= 0 ? Math.max(0, starts[currentClipIndex] + lengths[currentClipIndex] - pos) : 0;
+  const timelineRemaining = Math.max(0, total - pos);
+
   // Page-scroll to follow the playhead during playback (Premiere "page scroll").
   useEffect(() => {
     const el = scroller.current;
@@ -351,6 +360,12 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
         <span className="tl-tools">
           <span className="mono tl-pos">{framesToTc(pos, fps)}</span>
           <span className="mono muted">/ {framesToTc(total, fps)}</span>
+          {entries.length > 0 && (
+            <span className="tl-countdowns">
+              <span className="mono muted small" title="Time remaining in the current clip">clip −{framesToTc(clipRemaining, fps)}</span>
+              <span className="mono muted small" title="Time remaining in the timeline">tl −{framesToTc(timelineRemaining, fps)}</span>
+            </span>
+          )}
           <button className="btn small ghost" onClick={() => splitAt(pos)} disabled={!entries.length} title="Split the clip under the playhead (S)">Split</button>
           <button className="btn small ghost" onClick={fit} title="Zoom to fit the sequence (\)">Fit</button>
           <label className="zoom" title="Zoom (Alt/Ctrl + wheel, + and −)">

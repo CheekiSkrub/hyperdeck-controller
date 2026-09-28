@@ -110,6 +110,15 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     return devices.setEdit(req.params.id, (req.body as { entries: unknown }).entries);
   });
 
+  // Instant replay: take the last N seconds of :id's current/most recent clip
+  // and put it on another device's timeline (works when that device can also
+  // see the file, e.g. both watching the same network share).
+  app.post<IdParams>('/api/devices/:id/instant-replay', async (req) => {
+    const b = req.body as { seconds: number; targetId: string; mode?: 'append' | 'replace' };
+    if (!b?.targetId) throw new ValidationError('targetId is required');
+    return devices.instantReplay(req.params.id, { seconds: Number(b.seconds) || 0, targetId: b.targetId, mode: b.mode === 'replace' ? 'replace' : 'append' });
+  });
+
   app.post<IdParams>('/api/devices/:id/refresh', async (req) => {
     const c = devices.client(req.params.id);
     media.invalidate(req.params.id);

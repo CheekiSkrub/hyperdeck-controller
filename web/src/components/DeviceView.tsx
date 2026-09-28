@@ -8,6 +8,7 @@ import { ClipViewer } from './ClipViewer';
 import { SettingsPanel } from './SettingsPanel';
 import { Slots } from './Slots';
 import { EditTimeline } from './EditTimeline';
+import { InstantReplay } from './InstantReplay';
 import { Transport } from './Transport';
 
 export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => void }) {
@@ -15,6 +16,7 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
   const [toast, setToast] = useState<{ text: string; kind: 'ok' | 'err' } | null>(null);
   const [tab, setTab] = useState<'control' | 'settings'>('control');
   const [viewing, setViewing] = useState<{ clip: ClipListing; startFrame?: number; editIndex?: number } | null>(null);
+  const [replaying, setReplaying] = useState(false);
 
   const notify = useCallback((text: string, kind: 'ok' | 'err' = 'err') => {
     setToast({ text, kind });
@@ -77,6 +79,7 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
         <div className="head-actions">
           <span className={`conn ${s.status}`}>{s.status === 'connected' ? 'Connected' : s.status === 'connecting' ? 'Connecting…' : 'Offline'}</span>
           <button className="btn small ghost" onClick={() => api.refresh(device.id).catch((e) => notify(e.message))} disabled={!connected}>Refresh</button>
+          <button className="btn small ghost" onClick={() => setReplaying(true)} disabled={!connected} title="Load the last N seconds of another HyperDeck's recording onto this timeline">⏮ Instant replay</button>
           <button className="btn small" onClick={onEdit}>Edit</button>
         </div>
       </header>
@@ -123,6 +126,8 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
           notify={notify}
         />
       )}
+
+      {replaying && <InstantReplay device={device} onClose={() => setReplaying(false)} notify={notify} />}
 
       {toast && <div className={`toast ${toast.kind}`} role="status">{toast.text}</div>}
     </div>

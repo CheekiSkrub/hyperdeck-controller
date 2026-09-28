@@ -32,6 +32,8 @@ export const api = {
   action: (id: string, action: string, body?: Record<string, unknown>) => req<{ ok: boolean }>('POST', `/api/devices/${id}/actions/${action}`, body ?? {}),
   probe: (host: string, port?: number) => req<AddressCheck>('POST', '/api/probe', { host, port }),
   setEdit: (id: string, entries: EditEntry[]) => req<EditEntry[]>('PUT', `/api/devices/${id}/edit`, { entries }),
+  instantReplay: (sourceId: string, body: { seconds: number; targetId: string; mode?: 'append' | 'replace' }) =>
+    req<{ source: { file: string; frames: number; fps: number }; inFrames: number; outFrames: number; edit: EditEntry[] }>('POST', `/api/devices/${sourceId}/instant-replay`, body),
   originalUrl: (id: string, slot: number, file: string): string | null => `/api/devices/${id}/media/original?${q(slot, file)}`,
   liveUrl: (id: string, slot: number, file: string, seconds: number): string | null =>
     `/api/devices/${id}/media/live?${q(slot, file)}&t=${seconds.toFixed(3)}`,

@@ -348,6 +348,7 @@ h2 { font-size: 16px; }
 
 /* ------------------------------------------------------------------ NLE timeline */
 .tl-pos { font-size: 15px; color: var(--warn); }
+.tl-countdowns { display: inline-flex; gap: 10px; padding-left: 6px; border-left: 1px solid var(--line); }
 .zoom { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .zoom input { width: 130px; accent-color: #7a8594; }
 .nle { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bg); }

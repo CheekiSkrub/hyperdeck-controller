@@ -127,6 +127,45 @@ export class DeviceManager extends EventEmitter {
     }
   }
 
+  /**
+   * The clip most likely still being recorded (or most recently recorded) on
+   * a device: the last file reported on its active slot. Used for "instant
+   * replay" — pulling the last N seconds of what one deck is capturing onto
+   * another deck's timeline, the way an EVS-style replay operator would.
+   */
+  instantReplaySource(id: string): { slotId: number; file: string; frames: number; fps: number; duration: string } | null {
+    const s = this.client(id).state;
+    const slotId = s.transport?.slotId ?? s.slots[0]?.slotId;
+    if (!slotId) return null;
+    const files = s.disks[slotId] ?? [];
+    const f = files.at(-1);
+    if (!f) return null;
+    const fps = fpsFromVideoFormat(f.videoFormat) ?? fpsFromVideoFormat(s.transport?.videoFormat ?? '') ?? 25;
+    return { slotId, file: f.name, frames: timecodeToFrames(f.duration, fps), fps, duration: f.duration };
+  }
+
+  /**
+   * Instant replay: take the last `seconds` of whatever `sourceId` is
+   * currently capturing (or most recently captured) and put it on `targetId`'s
+   * timeline. Only works when `targetId` can see that file itself — normally
+   * because both decks are pointed at the same network share, the way a
+   * dedicated replay channel watches the same storage the record channels
+   * write to. `validateEdit`/`setEdit` will report a clear error otherwise.
+   */
+  async instantReplay(sourceId: string, opts: { seconds: number; targetId: string; mode: 'append' | 'replace' }) {
+    const src = this.instantReplaySource(sourceId);
+    if (!src) throw new CommandError('No recorded clip found on that HyperDeck', 404);
+    if (!(opts.seconds > 0)) throw new CommandError('Enter how many seconds back to take', 400);
+    const out = src.frames;
+    const inF = Math.max(0, out - Math.round(opts.seconds * src.fps));
+    if (out - inF < 1) throw new CommandError(`"${src.file}" has nothing recorded yet`, 409);
+    const entry = { file: src.file, in: inF, out, frames: src.frames };
+    const target = this.client(opts.targetId);
+    const base = opts.mode === 'append' ? target.state.edit : [];
+    const edit = await this.setEdit(opts.targetId, [...base, entry]);
+    return { source: src, inFrames: inF, outFrames: out, edit };
+  }
+
   clips(id: string, isNetwork: (slotId: number) => boolean): ClipListing[] {
     const s = this.client(id).state;
     const out: ClipListing[] = [];
