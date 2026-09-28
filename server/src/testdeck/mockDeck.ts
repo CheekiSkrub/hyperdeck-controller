@@ -390,7 +390,12 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
         const id = Number(params['slot id']);
         if (!slots[id]) return '102 invalid value\r\n';
         deck.slotId = id; deck.status = 'stopped'; deck.speed = 0;
-        rebuildTimeline();
+        // Slot 3 is network storage — a general media library (a real NAS folder can hold
+        // dozens/hundreds of unrelated files), not the deck's own sequential recording, so
+        // selecting it starts with an empty timeline rather than dumping every file it can see
+        // onto the play queue. Slots 1/2 (local media, the deck's own small recorded clips) keep
+        // the previous behaviour of loading straight onto the timeline when selected.
+        if (id === 3) { deck.timeline = []; deck.position = 0; } else rebuildTimeline();
         pushTransport();
         return ok;
       }
