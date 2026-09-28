@@ -7,3 +7,5 @@ release/
 tools/.mock-media/
 .dev-data/
 web/dist-demo/
+# Vite writes this beside the config while loading it, which made the build stamp read "+dirty"
+vite.config.*.timestamp-*
