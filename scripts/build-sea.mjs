@@ -41,6 +41,29 @@ const run = (cmd, opts = {}) => {
   execSync(cmd, { stdio: 'inherit', cwd: root, ...opts });
 };
 
+/**
+ * Sniff an executable's file format from its header and say which platform
+ * it's actually for, so a binary fetched/cached for the wrong platform (e.g.
+ * a Linux ffmpeg-static download left over from packaging for another target
+ * on this machine) is caught here instead of shipped and failing silently at
+ * runtime on the user's machine. Returns null when it matches `wantPlatform`
+ * (or the format is unrecognised — old/exotic formats aren't second-guessed).
+ */
+function binaryPlatformMismatch(file, wantPlatform) {
+  const fd = fs.openSync(file, 'r');
+  const buf = Buffer.alloc(8);
+  fs.readSync(fd, buf, 0, 8, 0);
+  fs.closeSync(fd);
+  let actual = null;
+  if (buf[0] === 0x4d && buf[1] === 0x5a) actual = 'win32'; // MZ
+  else if (buf[0] === 0x7f && buf.toString('ascii', 1, 4) === 'ELF') actual = 'linux';
+  else if (buf.readUInt32BE(0) === 0xfeedface || buf.readUInt32BE(0) === 0xfeedfacf
+    || buf.readUInt32LE(0) === 0xfeedface || buf.readUInt32LE(0) === 0xfeedfacf
+    || buf.readUInt32BE(0) === 0xcafebabe || buf.readUInt32BE(0) === 0xbebafeca) actual = 'darwin';
+  if (!actual || actual === wantPlatform) return null;
+  return actual;
+}
+
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 fs.mkdirSync(work, { recursive: true });
@@ -97,11 +120,32 @@ if (!process.env.SKIP_FFMPEG) {
     ffmpeg = path.join(process.env.FFMPEG_DIR, `ffmpeg${exe}`);
     ffprobe = path.join(process.env.FFMPEG_DIR, `ffprobe${exe}`);
   } else {
+    // ffprobe-static ships every platform's binary inside the npm package itself
+    // (no download), so pick TARGET_PLATFORM/TARGET_ARCH's copy directly instead
+    // of going through its own index.js, which only picks the *host's* binary.
+    const ffprobeStaticDir = path.dirname(require.resolve('ffprobe-static/package.json'));
+    ffprobe = path.join(ffprobeStaticDir, 'bin', platform, arch, `ffprobe${exe}`);
+    // ffmpeg-static downloads a single binary at `npm install` time, for whatever
+    // platform/arch it was told to fetch (npm_config_platform/npm_config_arch, or
+    // the host's by default) — verified below against what we're actually
+    // packaging for, so a mismatch fails the build instead of shipping quietly
+    // broken.
     ffmpeg = require('ffmpeg-static');
-    ffprobe = require('ffprobe-static').path;
   }
   for (const [src, dst] of [[ffmpeg, `ffmpeg${exe}`], [ffprobe, `ffprobe${exe}`]]) {
     if (!src || !fs.existsSync(src)) throw new Error(`Missing ${dst} (looked at ${src}). Set FFMPEG_DIR or SKIP_FFMPEG=1.`);
+    const mismatch = binaryPlatformMismatch(src, platform);
+    if (mismatch) {
+      throw new Error(
+        `${dst} at ${src} is a ${mismatch} binary, not ${platform} — refusing to bundle a broken ffmpeg into a ` +
+        `${platform}/${arch} release.\n` +
+        (process.env.FFMPEG_DIR
+          ? `Point FFMPEG_DIR at binaries built for ${platform}/${arch}.`
+          : `Reinstall ffmpeg-static for this target before packaging, e.g.:\n` +
+            `  npm_config_platform=${platform} npm_config_arch=${arch} npm rebuild ffmpeg-static\n` +
+            `or set FFMPEG_DIR to a folder with the right ffmpeg${exe}/ffprobe${exe}, or SKIP_FFMPEG=1.`),
+      );
+    }
     fs.copyFileSync(src, path.join(outDir, dst));
     fs.chmodSync(path.join(outDir, dst), 0o755);
   }

@@ -83,13 +83,24 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     const v = codec === 'prores'
       ? ['-c:v', 'prores_ks', '-profile:v', '0']
       : ['-c:v', 'libx264', '-preset', 'veryfast', '-g', '50', '-pix_fmt', 'yuv420p'];
-    execFileSync(opts.ffmpeg, [
+    const args = (vf: string) => [
       '-hide_banner', '-loglevel', 'error', '-y',
       '-f', 'lavfi', '-i', `${pattern}=size=1280x720:rate=${FPS}:duration=${durationSeconds}`,
       '-f', 'lavfi', '-i', `sine=frequency=440:duration=${durationSeconds}`,
-      '-vf', `drawtext=text='${name.replace(/[':]/g, '')} %{frame_num}':x=40:y=40:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.6${codec === 'prores' ? ',format=yuv422p10le' : ''}`,
+      ...(vf ? ['-vf', vf] : []),
       ...v, '-c:a', codec === 'prores' ? 'pcm_s16le' : 'aac', '-timecode', tc, out,
-    ]);
+    ];
+    // Burn in the clip name + frame number for a visual cue when scrubbing — but
+    // `drawtext` needs a font/text-rendering library that a minimal/static ffmpeg
+    // build (e.g. the one bundled with packaged releases) may not have compiled
+    // in. Fall back to the plain pattern (still distinct per slot/clip) rather
+    // than failing to generate test media at all.
+    const withText = `drawtext=text='${name.replace(/[':]/g, '')} %{frame_num}':x=40:y=40:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.6${codec === 'prores' ? ',format=yuv422p10le' : ''}`;
+    try {
+      execFileSync(opts.ffmpeg, args(withText), { stdio: 'pipe' });
+    } catch {
+      execFileSync(opts.ffmpeg, args(codec === 'prores' ? 'format=yuv422p10le' : ''));
+    }
   };
 
   function prepareMedia() {
