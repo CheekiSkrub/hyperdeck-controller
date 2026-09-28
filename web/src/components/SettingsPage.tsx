@@ -122,10 +122,13 @@ function CredentialsSection({ notify }: { notify: (m: string, kind?: 'ok' | 'err
   const [editLabel, setEditLabel] = useState('');
   const [editUser, setEditUser] = useState('');
   const [editPass, setEditPass] = useState('');
+  const [editPath, setEditPath] = useState('');
   const [newLabel, setNewLabel] = useState('');
   const [newUser, setNewUser] = useState('');
   const [newPass, setNewPass] = useState('');
+  const [newPath, setNewPath] = useState('');
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState<Record<string, { busy: boolean; ok?: boolean; message?: string; entries?: { name: string; isDir: boolean }[] }>>({});
 
   const load = () => api.credentials().then(setList).catch((e) => notify((e as Error).message));
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -134,8 +137,8 @@ function CredentialsSection({ notify }: { notify: (m: string, kind?: 'ok' | 'err
     if (!newLabel.trim() || !newUser.trim()) return;
     setBusy(true);
     try {
-      await api.createCredential(newLabel.trim(), newUser.trim(), newPass);
-      setNewLabel(''); setNewUser(''); setNewPass('');
+      await api.createCredential(newLabel.trim(), newUser.trim(), newPass, newPath);
+      setNewLabel(''); setNewUser(''); setNewPass(''); setNewPath('');
       notify('Saved credential added', 'ok');
       load();
     } catch (e) {
@@ -145,12 +148,12 @@ function CredentialsSection({ notify }: { notify: (m: string, kind?: 'ok' | 'err
     }
   };
 
-  const startEdit = (c: NasCredential) => { setEditing(c.id); setEditLabel(c.label); setEditUser(c.username); setEditPass(''); };
+  const startEdit = (c: NasCredential) => { setEditing(c.id); setEditLabel(c.label); setEditUser(c.username); setEditPass(''); setEditPath(c.path ?? ''); };
 
   const saveEdit = async (id: string) => {
     setBusy(true);
     try {
-      await api.updateCredential(id, { label: editLabel, username: editUser, ...(editPass ? { password: editPass } : {}) });
+      await api.updateCredential(id, { label: editLabel, username: editUser, path: editPath, ...(editPass ? { password: editPass } : {}) });
       setEditing(null);
       notify('Saved credential updated', 'ok');
       load();
@@ -158,6 +161,16 @@ function CredentialsSection({ notify }: { notify: (m: string, kind?: 'ok' | 'err
       notify((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const test = async (c: NasCredential) => {
+    setTesting((t) => ({ ...t, [c.id]: { busy: true } }));
+    try {
+      const r = await api.testCredential(c.id);
+      setTesting((t) => ({ ...t, [c.id]: { busy: false, ok: r.ok, message: r.message, entries: r.entries } }));
+    } catch (e) {
+      setTesting((t) => ({ ...t, [c.id]: { busy: false, ok: false, message: (e as Error).message } }));
     }
   };
 
@@ -190,23 +203,45 @@ function CredentialsSection({ notify }: { notify: (m: string, kind?: 'ok' | 'err
           {list.map((c) => (
             <li key={c.id}>
               {editing === c.id ? (
-                <div className="row3 cred-edit">
-                  <label><span>Name</span><input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} /></label>
-                  <label><span>Username</span><input value={editUser} onChange={(e) => setEditUser(e.target.value)} /></label>
-                  <label><span>New password (leave blank to keep)</span><input type="password" value={editPass} onChange={(e) => setEditPass(e.target.value)} /></label>
-                  <span className="cred-edit-actions">
-                    <button type="button" className="btn small primary" disabled={busy} onClick={() => saveEdit(c.id)}>Save</button>
-                    <button type="button" className="btn small ghost" onClick={() => setEditing(null)}>Cancel</button>
-                  </span>
+                <div className="cred-edit">
+                  <div className="row3">
+                    <label><span>Name</span><input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} /></label>
+                    <label><span>Username</span><input value={editUser} onChange={(e) => setEditUser(e.target.value)} /></label>
+                    <label><span>New password (leave blank to keep)</span><input type="password" value={editPass} onChange={(e) => setEditPass(e.target.value)} /></label>
+                  </div>
+                  <div className="row3">
+                    <label><span>Path (UNC or mount point, for Test)</span><input value={editPath} onChange={(e) => setEditPath(e.target.value)} placeholder="\\nas.local\Share" /></label>
+                    <span className="cred-edit-actions">
+                      <button type="button" className="btn small primary" disabled={busy} onClick={() => saveEdit(c.id)}>Save</button>
+                      <button type="button" className="btn small ghost" onClick={() => setEditing(null)}>Cancel</button>
+                    </span>
+                  </div>
                 </div>
               ) : (
-                <div className="cred-row">
-                  <span className="cred-label">{c.label}</span>
-                  <span className="mono muted small cred-user">{c.username}</span>
-                  <span className="cred-actions">
-                    <button type="button" className="btn small ghost" onClick={() => startEdit(c)}>Edit</button>
-                    <button type="button" className="btn small ghost" disabled={busy} onClick={() => remove(c)}>Remove</button>
-                  </span>
+                <div className="cred-row-wrap">
+                  <div className="cred-row">
+                    <span className="cred-label">{c.label}</span>
+                    <span className="mono muted small cred-user">{c.username}{c.path ? ` · ${c.path}` : ''}</span>
+                    <span className="cred-actions">
+                      <button type="button" className="btn small ghost" disabled={testing[c.id]?.busy} onClick={() => test(c)}>
+                        {testing[c.id]?.busy ? 'Testing…' : 'Test'}
+                      </button>
+                      <button type="button" className="btn small ghost" onClick={() => startEdit(c)}>Edit</button>
+                      <button type="button" className="btn small ghost" disabled={busy} onClick={() => remove(c)}>Remove</button>
+                    </span>
+                  </div>
+                  {testing[c.id] && !testing[c.id].busy && (
+                    <div className={`cred-test-result ${testing[c.id].ok ? 'ok' : 'err'}`}>
+                      <p className="small">{testing[c.id].message}</p>
+                      {testing[c.id].entries && testing[c.id].entries!.length > 0 && (
+                        <ul className="cred-entries">
+                          {testing[c.id].entries!.map((e) => (
+                            <li key={e.name}>{e.isDir ? '📁' : '📄'} {e.name}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </li>
@@ -214,10 +249,15 @@ function CredentialsSection({ notify }: { notify: (m: string, kind?: 'ok' | 'err
         </ul>
       )}
 
-      <div className="cred-add row3">
-        <label><span>Name</span><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Studio NAS" /></label>
-        <label><span>Username</span><input value={newUser} onChange={(e) => setNewUser(e.target.value)} /></label>
-        <label><span>Password</span><input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} /></label>
+      <div className="cred-add">
+        <div className="row3">
+          <label><span>Name</span><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Studio NAS" /></label>
+          <label><span>Username</span><input value={newUser} onChange={(e) => setNewUser(e.target.value)} /></label>
+          <label><span>Password</span><input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} /></label>
+        </div>
+        <div className="row3">
+          <label><span>Path (UNC or mount point, for Test)</span><input value={newPath} onChange={(e) => setNewPath(e.target.value)} placeholder="\\nas.local\Share" /></label>
+        </div>
       </div>
       <div className="form-actions">
         <span className="spacer" />

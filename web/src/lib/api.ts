@@ -22,11 +22,12 @@ export const api = {
   updateAppSettings: (patch: Partial<AppSettings>) => req<AppSettings & { restartRequired: boolean }>('PATCH', '/api/settings', patch),
 
   credentials: () => req<NasCredential[]>('GET', '/api/credentials'),
-  createCredential: (label: string, username: string, password?: string) =>
-    req<NasCredential>('POST', '/api/credentials', { label, username, password }),
-  updateCredential: (id: string, patch: { label?: string; username?: string; password?: string }) =>
+  createCredential: (label: string, username: string, password?: string, path?: string) =>
+    req<NasCredential>('POST', '/api/credentials', { label, username, password, path }),
+  updateCredential: (id: string, patch: { label?: string; username?: string; password?: string; path?: string }) =>
     req<NasCredential>('PATCH', `/api/credentials/${id}`, patch),
   deleteCredential: (id: string) => req<void>('DELETE', `/api/credentials/${id}`),
+  testCredential: (id: string) => req<{ ok: boolean; message: string; entries?: { name: string; isDir: boolean }[] }>('POST', `/api/credentials/${id}/test`),
   createDevice: (d: DeviceInput) => req<Device>('POST', '/api/devices', d),
   createTestDevice: (name?: string) => req<Device>('POST', '/api/devices/test', { name }),
   updateDevice: (id: string, d: DeviceInput) => req<Device>('PATCH', `/api/devices/${id}`, d),

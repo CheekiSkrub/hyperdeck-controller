@@ -227,6 +227,32 @@ export class MediaLocator {
     }
   }
 
+  /**
+   * Connect with a login (if given) and list the top-level entries of a
+   * path — used to actually verify a saved NAS credential works end to end,
+   * not just that it's well-formed, and to show what's there.
+   */
+  async testPath(localPath: string, username?: string, password?: string): Promise<{ ok: boolean; message: string; entries?: { name: string; isDir: boolean }[] }> {
+    if (!localPath?.trim()) return { ok: false, message: 'No path set on this credential — add one to test it.' };
+    if (username) {
+      const conn = await this.connectShare({ label: 'test', localPath, username, password } as ShareMapping);
+      if (!conn.ok) return conn;
+    }
+    try {
+      const st = await fs.promises.stat(localPath);
+      if (!st.isDirectory()) return { ok: false, message: 'Path exists but is not a folder' };
+      const dirents = await fs.promises.readdir(localPath, { withFileTypes: true });
+      const entries = dirents
+        .filter((d) => !d.name.startsWith('.'))
+        .map((d) => ({ name: d.name, isDir: d.isDirectory() }))
+        .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
+        .slice(0, 200);
+      return { ok: true, message: `Connected — ${entries.length} item${entries.length === 1 ? '' : 's'} at the top level`, entries };
+    } catch (e) {
+      return { ok: false, message: `Cannot read ${localPath}: ${(e as Error).message}` };
+    }
+  }
+
   async testFtp(device: Device): Promise<{ ok: boolean; message: string; mediaFiles?: number; folders?: string[] }> {
     try {
       const files = await this.getFtpIndex(device, true);

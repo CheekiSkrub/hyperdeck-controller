@@ -15,6 +15,8 @@ export interface NasCredential {
   label: string;
   username: string;
   password: string;
+  /** UNC path or mount point this login connects to — lets "Test" actually verify it and list what's there. */
+  path?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,7 +45,7 @@ export class CredentialStore {
     return this.items.find((c) => c.id === id);
   }
 
-  create(input: { label?: string; username?: string; password?: string }): NasCredential {
+  create(input: { label?: string; username?: string; password?: string; path?: string }): NasCredential {
     const label = input.label?.trim();
     if (!label) throw new ValidationError('Name is required');
     if (!input.username?.trim()) throw new ValidationError('Username is required');
@@ -53,6 +55,7 @@ export class CredentialStore {
       label,
       username: input.username.trim(),
       password: input.password ?? '',
+      path: input.path?.trim() || undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -61,7 +64,7 @@ export class CredentialStore {
     return c;
   }
 
-  update(id: string, patch: { label?: string; username?: string; password?: string }): NasCredential {
+  update(id: string, patch: { label?: string; username?: string; password?: string; path?: string }): NasCredential {
     const c = this.get(id);
     if (!c) throw new ValidationError('Saved credential not found');
     if (patch.label !== undefined) {
@@ -74,6 +77,7 @@ export class CredentialStore {
       c.username = patch.username.trim();
     }
     if (patch.password !== undefined) c.password = patch.password;
+    if (patch.path !== undefined) c.path = patch.path.trim() || undefined;
     c.updatedAt = new Date().toISOString();
     this.save();
     return c;

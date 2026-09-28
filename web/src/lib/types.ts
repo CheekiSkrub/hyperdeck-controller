@@ -201,6 +201,8 @@ export interface NasCredential {
   label: string;
   username: string;
   password: string;
+  /** UNC path or mount point this login connects to — lets "Test" verify it and list what's there. */
+  path?: string;
   createdAt: string;
   updatedAt: string;
 }

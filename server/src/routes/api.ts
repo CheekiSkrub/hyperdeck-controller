@@ -73,10 +73,16 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     return c;
   });
   app.patch<{ Params: { id: string } }>('/api/credentials/:id', async (req) =>
-    ctx.credentials.update(req.params.id, req.body as { label?: string; username?: string; password?: string }));
+    ctx.credentials.update(req.params.id, req.body as { label?: string; username?: string; password?: string; path?: string }));
   app.delete<{ Params: { id: string } }>('/api/credentials/:id', async (req, reply) => {
     ctx.credentials.remove(req.params.id);
     reply.status(204);
+  });
+  // Actually connect with a saved credential and list what's at its path, rather than just checking it's filled in.
+  app.post<{ Params: { id: string } }>('/api/credentials/:id/test', async (req) => {
+    const c = ctx.credentials.get(req.params.id);
+    if (!c) throw new ValidationError('Saved credential not found');
+    return locator.testPath(c.path ?? '', c.username, c.password);
   });
 
   // ------------------------------------------------------------------ Devices CRUD
