@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import type { ClipListing, Device } from '../lib/types';
 import { CLIP_MIME, type DraggedClip } from './EditTimeline';
+import { NetworkDrives } from './NetworkDrives';
 
 export function ClipBrowser({ device, onOpen, notify }: { device: Device; onOpen: (c: ClipListing) => void; notify: (m: string) => void }) {
   const [clips, setClips] = useState<ClipListing[]>([]);
   const [slot, setSlot] = useState<number | 'all'>('all');
   const [search, setSearch] = useState('');
+  const [mode, setMode] = useState<'clips' | 'network'>('clips');
   const s = device.state;
 
   // Re-fetch whenever the deck reports different media or timeline.
@@ -27,14 +29,17 @@ export function ClipBrowser({ device, onOpen, notify }: { device: Device; onOpen
       <div className="clips-head">
         <h2>Clips</h2>
         <div className="seg" role="group" aria-label="Filter by media">
-          <button className={slot === 'all' ? 'on' : ''} onClick={() => setSlot('all')}>All</button>
+          <button className={mode === 'clips' && slot === 'all' ? 'on' : ''} onClick={() => { setMode('clips'); setSlot('all'); }}>All</button>
           {slots.map(([id, label]) => (
-            <button key={id} className={slot === id ? 'on' : ''} onClick={() => setSlot(id)}>{label}</button>
+            <button key={id} className={mode === 'clips' && slot === id ? 'on' : ''} onClick={() => { setMode('clips'); setSlot(id); }}>{label}</button>
           ))}
+          <button className={mode === 'network' ? 'on' : ''} onClick={() => setMode('network')}>Network drives</button>
         </div>
-        <input className="search" placeholder="Search clips" value={search} onChange={(e) => setSearch(e.target.value)} />
+        {mode === 'clips' && <input className="search" placeholder="Search clips" value={search} onChange={(e) => setSearch(e.target.value)} />}
       </div>
-      {s.status !== 'connected' && clips.length === 0 ? (
+      {mode === 'network' ? (
+        <NetworkDrives device={device} knownClips={clips} onOpen={onOpen} notify={notify} />
+      ) : s.status !== 'connected' && clips.length === 0 ? (
         <p className="muted">Connect to the HyperDeck to browse its clips.</p>
       ) : shown.length === 0 ? (
         <p className="muted">No clips{search ? ' match your search' : ' on mounted media'}.</p>

@@ -234,22 +234,46 @@ export class MediaLocator {
    */
   async testPath(localPath: string, username?: string, password?: string): Promise<{ ok: boolean; message: string; entries?: { name: string; isDir: boolean }[] }> {
     if (!localPath?.trim()) return { ok: false, message: 'No path set on this credential — add one to test it.' };
+    const r = await this.browse(localPath, undefined, username, password);
+    if (!r.ok) return r;
+    return { ok: true, message: `Connected — ${r.entries!.length} item${r.entries!.length === 1 ? '' : 's'} at the top level`, entries: r.entries };
+  }
+
+  /**
+   * List the contents of a folder under `root`, optionally descending into
+   * `subPath` first — the general "browse a mapped NAS" primitive behind
+   * both the credential Test button and the Network drives panel. Connects
+   * with the given login first (Windows `net use`) when one is supplied.
+   */
+  async browse(root: string, subPath: string | undefined, username?: string, password?: string): Promise<{ ok: boolean; message: string; path?: string; entries?: { name: string; isDir: boolean; size?: number; modifiedAt?: string }[] }> {
+    if (!root?.trim()) return { ok: false, message: 'No path configured for this source.' };
     if (username) {
-      const conn = await this.connectShare({ label: 'test', localPath, username, password } as ShareMapping);
+      const conn = await this.connectShare({ label: 'browse', localPath: root, username, password } as ShareMapping);
       if (!conn.ok) return conn;
     }
+    const resolvedRoot = path.resolve(root);
+    const resolvedTarget = path.resolve(subPath ? path.join(root, subPath) : root);
+    if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(resolvedRoot + path.sep)) {
+      return { ok: false, message: 'That path is outside the mapped folder.' };
+    }
     try {
-      const st = await fs.promises.stat(localPath);
+      const st = await fs.promises.stat(resolvedTarget);
       if (!st.isDirectory()) return { ok: false, message: 'Path exists but is not a folder' };
-      const dirents = await fs.promises.readdir(localPath, { withFileTypes: true });
-      const entries = dirents
-        .filter((d) => !d.name.startsWith('.'))
-        .map((d) => ({ name: d.name, isDir: d.isDirectory() }))
-        .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
-        .slice(0, 200);
-      return { ok: true, message: `Connected — ${entries.length} item${entries.length === 1 ? '' : 's'} at the top level`, entries };
+      const dirents = await fs.promises.readdir(resolvedTarget, { withFileTypes: true });
+      const entries = await Promise.all(
+        dirents
+          .filter((d) => !d.name.startsWith('.'))
+          .slice(0, 500)
+          .map(async (d) => {
+            if (d.isDirectory()) return { name: d.name, isDir: true };
+            const fst = await fs.promises.stat(path.join(resolvedTarget, d.name)).catch(() => null);
+            return { name: d.name, isDir: false, size: fst?.size, modifiedAt: fst?.mtime.toISOString() };
+          }),
+      );
+      entries.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
+      return { ok: true, message: `${entries.length} item${entries.length === 1 ? '' : 's'}`, path: path.relative(resolvedRoot, resolvedTarget) || '.', entries };
     } catch (e) {
-      return { ok: false, message: `Cannot read ${localPath}: ${(e as Error).message}` };
+      return { ok: false, message: `Cannot read ${resolvedTarget}: ${(e as Error).message}` };
     }
   }
 

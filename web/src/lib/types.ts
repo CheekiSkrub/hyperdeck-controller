@@ -207,6 +207,18 @@ export interface NasCredential {
   updatedAt: string;
 }
 
+export interface NetworkDriveSource {
+  key: string;
+  label: string;
+}
+
+export interface NetworkDriveEntry {
+  name: string;
+  isDir: boolean;
+  size?: number;
+  modifiedAt?: string;
+}
+
 export interface AddressCheck {
   reachable: boolean;
   model?: string;

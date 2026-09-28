@@ -1,4 +1,4 @@
-import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost, AppSettings, NasCredential} from './types';
+import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost, AppSettings, NasCredential, NetworkDriveSource, NetworkDriveEntry} from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -34,6 +34,9 @@ export const api = {
   deleteDevice: (id: string) => req<void>('DELETE', `/api/devices/${id}`),
   refresh: (id: string) => req<unknown>('POST', `/api/devices/${id}/refresh`),
   testSources: (id: string) => req<SourcesTest>('GET', `/api/devices/${id}/sources/test`),
+  networkDriveSources: (id: string) => req<NetworkDriveSource[]>('GET', `/api/devices/${id}/network-drives/sources`),
+  browseNetworkDrive: (id: string, key: string, subPath?: string) =>
+    req<{ ok: boolean; message: string; path?: string; entries?: NetworkDriveEntry[] }>('POST', `/api/devices/${id}/network-drives/browse`, { key, subPath }),
 
   command: (id: string, command: string, params?: Record<string, string | number | boolean>) =>
     req<{ code: number; text: string }>('POST', `/api/devices/${id}/command`, { command, params }),

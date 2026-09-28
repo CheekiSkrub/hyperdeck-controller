@@ -178,6 +178,25 @@ h2 { font-size: 16px; }
 .thumb { position: relative; aspect-ratio: 16 / 9; background: #07080a; display: grid; place-items: center; }
 .thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .thumb-fail { color: var(--muted); font-size: 12px; padding: 8px; text-align: center; }
+
+/* ------------------------------------------------------------ network drives */
+.network-drives { display: flex; flex-direction: column; gap: 10px; }
+.nd-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.nd-head select { min-width: 160px; }
+.nd-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
+.nd-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.nd-list li { border-bottom: 1px solid var(--line); }
+.nd-list li:last-child { border-bottom: 0; }
+.nd-entry {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 4px; background: transparent; border: 0;
+  text-align: left; font-size: 13px; color: inherit;
+}
+button.nd-entry { cursor: pointer; }
+button.nd-entry:hover { background: var(--panel-2); }
+.nd-icon { flex: 0 0 auto; }
+.nd-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nd-size { flex: 0 0 auto; }
+
 .duration { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.72); padding: 1px 6px; border-radius: 4px; font-size: 11px; }
 .tag { position: absolute; left: 6px; top: 6px; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
 .tag.net { background: #6b4bd6; }

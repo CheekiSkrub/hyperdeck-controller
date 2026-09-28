@@ -241,6 +241,34 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     return locator.connectShare(share);
   });
 
+  // ------------------------------------------------------------------ Network drives
+  // Browse a share/saved-credential's folder structure directly, independent of what the
+  // HyperDeck itself reports as a slot — for exploring/verifying what's on a mapped NAS.
+
+  app.get<IdParams>('/api/devices/:id/network-drives/sources', async (req) => {
+    const d = devices.get(req.params.id);
+    const shareSources = d.shares.filter((s) => s.localPath.trim()).map((s) => ({ key: `share:${s.id}`, label: s.label }));
+    const credSources = ctx.credentials.list().filter((c) => c.path?.trim()).map((c) => ({ key: `credential:${c.id}`, label: c.label }));
+    return [...shareSources, ...credSources];
+  });
+
+  app.post<IdParams>('/api/devices/:id/network-drives/browse', async (req) => {
+    const d = devices.get(req.params.id);
+    const b = req.body as { key: string; subPath?: string };
+    const [kind, id] = (b.key ?? '').split(':');
+    if (kind === 'share') {
+      const share = d.shares.find((s) => s.id === id);
+      if (!share) throw new ValidationError('Share not found');
+      return locator.browse(share.localPath, b.subPath, share.username, share.password);
+    }
+    if (kind === 'credential') {
+      const c = ctx.credentials.get(id);
+      if (!c) throw new ValidationError('Saved credential not found');
+      return locator.browse(c.path ?? '', b.subPath, c.username, c.password);
+    }
+    throw new ValidationError('Unknown network drive source');
+  });
+
   app.get<IdParams>('/api/devices/:id/media/info', async (req) => {
     const { device, state } = ctxFor(req.params.id);
     const m = await media.media(device, state, clipRef(req));
