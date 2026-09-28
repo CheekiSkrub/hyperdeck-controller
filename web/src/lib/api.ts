@@ -1,4 +1,4 @@
-import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost, AppSettings, NasCredential, NetworkDriveSource, NetworkDriveEntry, ShareSpace} from './types';
+import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost, AppSettings, NasCredential, NetworkDriveSource, NetworkDriveEntry, ShareSpace, AudioStatus} from './types';
 import { beginRequest } from './busy';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -83,6 +83,8 @@ export const api = {
     req<TransportInfo>('POST', `/api/devices/${id}/load`, body),
 
   mediaInfo: (id: string, slot: number, file: string) => req<MediaInfo>('GET', `/api/devices/${id}/media/info?${q(slot, file)}`),
+  audio: (id: string, slot: number, file: string) => req<AudioStatus>('GET', `/api/devices/${id}/media/audio?${q(slot, file)}`),
+  audioLevelsUrl: (key: string) => `/api/media/audio/${key}`,
   strip: (id: string, slot: number, file: string) => req<StripStatus>('GET', `/api/devices/${id}/media/strip?${q(slot, file)}`),
   startProxy: (id: string, slot: number, file: string) => req<ProxyStatus>('POST', `/api/devices/${id}/media/proxy`, { slot, file }),
   cancelProxy: (key: string) => req<void>('DELETE', `/api/media/proxy/${key}`),

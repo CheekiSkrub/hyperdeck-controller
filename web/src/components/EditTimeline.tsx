@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { levelsAt, useAudioLevels, type AudioLevels } from '../lib/audio';
 import { entryLength, isSlice, type Editor } from '../lib/editor';
 import { useLiveFrames } from '../lib/liveFrames';
 import { useMediaEvents } from '../lib/store';
 import { SavedTimelines } from './SavedTimelines';
+import { VuMeters } from './VuMeters';
+import { Waveform } from './Waveform';
 import { fpsFromFormat, framesToTc, tcToFrames } from '../lib/tc';
 import type { Device, EditEntry, StripStatus } from '../lib/types';
 
@@ -212,6 +215,18 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
 
   // ------------------------------------------------------------------ ruler ticks (visible range only)
   const strips = useStrips(device.id, t.slotId, entries.map((e) => e.file));
+  const audio = useAudioLevels(device.id, t.slotId, entries.map((e) => e.file));
+
+  // VU meters follow the playhead through the clip under it. The deck's audio output never
+  // reaches the browser, so this reads the levels analysed from the same file at that point —
+  // only while the deck is actually moving (or being scrubbed), otherwise the meters fall away.
+  const meterChannels = Math.max(2, ...Object.values(audio).map((l) => (l ? l.channels : 0)));
+  const meterLevels = (() => {
+    if (currentClipIndex < 0 || !(MOVING.has(t.status) || scrubbing !== null)) return null;
+    const e = entries[currentClipIndex];
+    const lv = audio[e.file];
+    return lv ? levelsAt(lv, (e.in + pos - starts[currentClipIndex]) / fps) : null;
+  })();
   const ticks = useMemo(() => rulerTicks(view.left, view.width, scale, fps), [view.left, view.width, scale, fps]);
 
   // ------------------------------------------------------------------ editing
@@ -446,7 +461,7 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
                         <span className="mono">{framesToTc(lengths[i], fps)}</span>
                       </span>
                     )}
-                    <span className="nle-audio" aria-hidden />
+                    <ClipWaveform levels={audio[e.file]} entry={e} left={starts[i] * scale} width={w} scale={scale} fps={fps} view={view} />
                     <span className="tl-handle in" onPointerDown={(ev) => startTrim(ev, i, 'in')} title="Drag to trim the start (ripple)" />
                     <span className="tl-handle out" onPointerDown={(ev) => startTrim(ev, i, 'out')} title="Drag to trim the end (ripple)" />
                   </div>
@@ -459,6 +474,9 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
               <span className="nle-playhead-cap" />
             </div>
           </div>
+        </div>
+        <div className="nle-meters">
+          <VuMeters levels={meterLevels} channels={meterChannels} />
         </div>
       </div>
       <div className="muted small tl-hint">
@@ -564,4 +582,30 @@ function rulerTicks(left: number, width: number, ppf: number, fps: number) {
   const out: { frame: number; major: boolean }[] = [];
   for (let fr = startF; fr <= endF && out.length < 600; fr += minor) out.push({ frame: fr, major: fr % major === 0 });
   return out;
+}
+
+/**
+ * The clip's audio lane: its real waveform once the server has analysed the file (a striped
+ * placeholder until then, or for a file with no audio). Only the part of the clip inside the
+ * viewport is drawn, so a long clip zoomed right in doesn't need a canvas thousands of pixels wide.
+ */
+function ClipWaveform({ levels, entry, left, width, scale, fps, view }: {
+  levels: AudioLevels | null | false | undefined;
+  entry: EditEntry;
+  left: number;
+  width: number;
+  scale: number;
+  fps: number;
+  view: { left: number; width: number };
+}) {
+  const visL = clamp(view.left - left, 0, width);
+  const visR = clamp(view.left + view.width - left, 0, width);
+  return (
+    <span className={`nle-audio ${levels ? 'has-wave' : ''}`} aria-hidden>
+      {levels && visR > visL && (
+        <Waveform levels={levels} from={(entry.in + visL / scale) / fps} to={(entry.in + visR / scale) / fps}
+          style={{ position: 'absolute', top: 0, bottom: 0, left: visL, width: visR - visL, height: '100%' }} />
+      )}
+    </span>
+  );
 }

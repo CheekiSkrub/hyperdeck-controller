@@ -53,6 +53,7 @@ async function main() {
   devices.on('devices', () => broadcast({ type: 'devices', devices: devices.list() }));
   media.on('strip', (e) => broadcast({ type: 'strip', ...e }));
   media.on('proxy', (e) => broadcast({ type: 'proxy', ...e }));
+  media.on('audio', (e) => broadcast({ type: 'audio', ...e }));
 
   app.register(async (scope) => {
     scope.get('/ws', { websocket: true }, (socket) => {

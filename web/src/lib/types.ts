@@ -160,6 +160,17 @@ export interface StripStatus {
   done: boolean;
 }
 
+/** Audio-levels pass for a clip (server/src/media/service.ts AudioStatus). */
+export interface AudioStatus {
+  key: string;
+  state: 'running' | 'ready' | 'error' | 'noaudio';
+  progress: number;
+  channels?: number;
+  rate?: number;
+  count?: number;
+  error?: string;
+}
+
 export interface SourcesTest {
   ftp: { ok: boolean; message: string; mediaFiles?: number; folders?: string[] };
   shares: { id: string; label: string; ok: boolean; message: string }[];

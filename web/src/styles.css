@@ -316,6 +316,10 @@ button.nd-entry:hover { background: var(--panel-2); }
 .strip { display: flex; height: 100%; }
 .strip-tile { flex: 1; min-width: 0; background: #111418; border-right: 1px solid #0b0c0e; overflow: hidden; }
 .strip-tile img { height: 100%; width: 100%; object-fit: cover; display: block; pointer-events: none; }
+.scrub-wave {
+  position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 42%; pointer-events: none;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .55));
+}
 .scrub-head { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: var(--warn); box-shadow: 0 0 8px var(--warn); pointer-events: none; }
 
 .viewer-controls { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
@@ -481,6 +485,7 @@ button.nd-entry:hover { background: var(--panel-2); }
   border-top: 1px solid rgba(0,0,0,.4);
 }
 .nle-clip.slice .nle-audio { background: repeating-linear-gradient(90deg, rgba(126, 226, 173, .3) 0 2px, transparent 2px 5px), #25352f; }
+.nle-audio.has-wave, .nle-clip.slice .nle-audio.has-wave { background: #1a2e27; }
 .nle-strip-progress {
   position: absolute; left: 0; right: 0; bottom: 22px; height: 3px; background: rgba(0,0,0,.35); pointer-events: none; overflow: hidden;
 }
@@ -520,3 +525,19 @@ button.nd-entry:hover { background: var(--panel-2); }
 .nd-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 26px; }
 .nd-card-meta > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clip-table tbody tr.nd-row-file { cursor: default; }
+
+/* ------------------------------------------------------------------ audio meters */
+.waveform { display: block; }
+.nle-meters { flex: none; border-left: 1px solid var(--line); background: var(--panel-2); padding: 4px 6px 2px 2px; height: 115px; box-sizing: border-box; }
+.vu { display: flex; gap: 2px; height: 100%; }
+/* The scale's top/bottom offsets match the bar area inside .vu-ch (clip lamp above, label below). */
+.vu-scale { position: relative; width: 20px; margin: 6px 2px 13px 0; font-size: 9px; color: var(--muted); font-family: var(--mono); }
+.vu-scale span { position: absolute; right: 0; transform: translateY(50%); line-height: 1; }
+.vu-ch { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 7px; }
+.vu-clip { height: 4px; border-radius: 1px; background: #3a1c1e; }
+.vu-clip.on { background: var(--rec); box-shadow: 0 0 4px var(--rec); }
+.vu-bar { position: relative; flex: 1; background: #0b0d10; border-radius: 1px; overflow: hidden; }
+/* -60..0 dBFS: -18 dB sits at 70%, -6 dB at 90%. */
+.vu-fill { position: absolute; inset: 0; background: linear-gradient(to top, var(--go) 0 70%, var(--warn) 70% 90%, var(--rec) 90%); }
+.vu-hold { position: absolute; left: 0; right: 0; height: 2px; margin-bottom: -1px; background: #fff; opacity: .85; }
+.vu-label { font-size: 9px; line-height: 11px; text-align: center; color: var(--muted); }

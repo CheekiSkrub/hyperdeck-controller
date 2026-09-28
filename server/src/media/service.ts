@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Device } from '../devices/store.js';
 import type { HyperDeckState } from '../hyperdeck/client.js';
-import { grabFrame, makeProxy, probe, type ProbeResult } from './ffmpeg.js';
+import { audioLevels, grabFrame, LEVEL_RATE, makeProxy, probe, type ProbeResult } from './ffmpeg.js';
 import type { MediaLocator, MediaSource } from './locator.js';
 
 /** Priority semaphore: exact-frame requests jump ahead of background filmstrip work. */
@@ -54,6 +54,19 @@ export interface StripStatus {
   done: boolean;
 }
 
+/** Per-channel audio levels for a clip (see ffmpeg.ts audioLevels): waveform + VU meters. */
+export interface AudioStatus {
+  key: string;
+  state: 'running' | 'ready' | 'error' | 'noaudio';
+  progress: number;
+  channels?: number;
+  /** Level windows per second. */
+  rate?: number;
+  /** Number of windows; the levels file is count x channels x [peak, rms] bytes. */
+  count?: number;
+  error?: string;
+}
+
 export interface ProxyStatus {
   key: string;
   state: 'none' | 'queued' | 'running' | 'ready' | 'error';
@@ -86,6 +99,9 @@ export class MediaService extends EventEmitter {
   private resolved = new Map<string, { at: number; media: Promise<ClipMedia> }>();
   private strips = new Map<string, StripStatus>();
   private proxies = new Map<string, ProxyStatus & { abort?: AbortController }>();
+  private audioJobs = new Map<string, AudioStatus>();
+  /** One audio pass per device at a time: each reads the whole file, so more would just fight for the disk/NAS. */
+  private audioSems = new Map<string, PrioritySemaphore>();
 
   constructor(
     private readonly locator: MediaLocator,
@@ -254,6 +270,58 @@ export class MediaService extends EventEmitter {
     })));
     status.done = true;
     this.emit('strip', { deviceId, key: m.key, index: -1, done: true });
+  }
+
+  // --------------------------------------------------------------------------- Audio levels
+
+  /** Start (or report) the audio-levels pass for a clip. Failures are remembered until the server restarts. */
+  async audio(device: Device, state: HyperDeckState, ref: ClipRef): Promise<AudioStatus> {
+    const m = await this.media(device, state, ref);
+    const job = this.audioJobs.get(m.key);
+    if (job) return job;
+    const metaFile = path.join(this.dir(m.key), 'audio.json');
+    try {
+      const meta = JSON.parse(await fs.promises.readFile(metaFile, 'utf8')) as AudioStatus;
+      if (fs.existsSync(path.join(this.dir(m.key), 'audio.bin'))) return { ...meta, key: m.key, state: 'ready', progress: 1 };
+    } catch { /* not generated yet */ }
+    if (!m.probe.audioChannels) return { key: m.key, state: 'noaudio', progress: 1 };
+
+    const status: AudioStatus = { key: m.key, state: 'running', progress: 0 };
+    this.audioJobs.set(m.key, status);
+    let last = 0;
+    const emit = () => this.emit('audio', { deviceId: device.id, ...status });
+    let sem = this.audioSems.get(device.id);
+    if (!sem) this.audioSems.set(device.id, (sem = new PrioritySemaphore(1)));
+    void sem.run(0, async () => {
+      try {
+        let p = m.probe;
+        // Probes cached before audioStreams existed: re-probe so multi-stream audio is merged correctly.
+        if (p.audioStreams === undefined) {
+          p = await probe(m.source.input);
+          await fs.promises.writeFile(path.join(this.dir(m.key), 'probe.json'), JSON.stringify(p));
+        }
+        const res = await audioLevels(m.source.input, p.audioStreams ?? 1, p.audioChannels, p.duration, (prog) => {
+          status.progress = prog;
+          if (prog - last >= 0.05) { last = prog; emit(); }
+        });
+        const dir = this.dir(m.key);
+        await fs.promises.writeFile(path.join(dir, 'audio.bin'), res.data);
+        const meta = { channels: res.channels, rate: LEVEL_RATE, count: res.count };
+        await fs.promises.writeFile(metaFile, JSON.stringify(meta));
+        Object.assign(status, meta, { state: 'ready', progress: 1 });
+        this.audioJobs.delete(m.key);
+      } catch (e) {
+        status.state = 'error';
+        status.error = (e as Error).message;
+      }
+      emit();
+    });
+    return status;
+  }
+
+  audioPath(key: string): string | null {
+    const f = path.join(this.cacheDir, key, 'audio.bin');
+    return fs.existsSync(f) ? f : null;
   }
 
   // --------------------------------------------------------------------------- Proxies

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { useAudioLevels } from '../lib/audio';
 import type { Editor } from '../lib/editor';
 import { useMediaEvents } from '../lib/store';
 import { framesToTc, tcToFrames } from '../lib/tc';
 import type { ClipListing, Device, MediaInfo, ProxyStatus, StripStatus } from '../lib/types';
 import { Modal } from './Modal';
+import { Waveform } from './Waveform';
 
 /**
  * Scrub a clip in the browser and cue the HyperDeck to the chosen frame.
@@ -49,6 +51,7 @@ export function ClipViewer({ device, clip, onClose, notify, editor, startFrame, 
 
   const fps = info?.probe.fps ?? clip.fps ?? 25;
   const frames = Math.max(1, info?.probe.frames ?? clip.frames ?? 1);
+  const wave = useAudioLevels(device.id, clip.slotId, [clip.file])[clip.file];
   // Proxies are H.264; every mainstream browser decodes it, but some Linux Chromium builds don't.
   const canPlayProxy = useMemo(() => Boolean(document.createElement('video').canPlayType('video/mp4; codecs="avc1.640028"')), []);
   const proxyReady = proxy?.state === 'ready' && useProxy && canPlayProxy;
@@ -321,6 +324,7 @@ export function ClipViewer({ device, clip, onClose, notify, editor, startFrame, 
                 </div>
               ))}
             </div>
+            {wave && <Waveform levels={wave} from={0} to={frames / fps} className="scrub-wave" />}
             {(markIn !== null || markOut !== null) && (
               <div className="scrub-range" style={{
                 left: `${(sliceIn / Math.max(1, frames - 1)) * 100}%`,

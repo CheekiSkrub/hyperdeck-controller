@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react';
-import type { Device, DeviceState } from './types';
+import type { AudioStatus, Device, DeviceState } from './types';
 
 /**
  * Live device list kept in sync over the server WebSocket. Media events
@@ -8,7 +8,8 @@ import type { Device, DeviceState } from './types';
 type Listener = () => void;
 type MediaEvent =
   | { type: 'strip'; deviceId: string; key: string; index: number; done?: boolean }
-  | { type: 'proxy'; deviceId: string; key: string; state: string; progress: number; error?: string };
+  | { type: 'proxy'; deviceId: string; key: string; state: string; progress: number; error?: string }
+  | ({ type: 'audio'; deviceId: string } & AudioStatus);
 
 /** Shown across the top of the panel; set only in the browser demo build. */
 export const DEMO_BANNER: string | null = null;
@@ -47,7 +48,7 @@ function connect() {
     } else if (msg.type === 'transport') {
       devices = devices.map((d) => (d.id === msg.id ? { ...d, state: { ...d.state, transport: msg.transport } } : d));
       emit();
-    } else if (msg.type === 'strip' || msg.type === 'proxy') {
+    } else if (msg.type === 'strip' || msg.type === 'proxy' || msg.type === 'audio') {
       for (const l of mediaListeners) l(msg);
     }
   };

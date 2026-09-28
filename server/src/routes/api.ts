@@ -407,6 +407,21 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     return sendJpeg(reply, file, true);
   });
 
+  // Audio levels (waveform + VU meters): status starts the pass if needed; the levels are binary.
+  app.get<IdParams>('/api/devices/:id/media/audio', async (req) => {
+    const { device, state } = ctxFor(req.params.id);
+    return media.audio(device, state, clipRef(req));
+  });
+
+  app.get<{ Params: { key: string } }>('/api/media/audio/:key', async (req, reply) => {
+    if (!/^[0-9a-f]{20}$/.test(req.params.key)) throw new ValidationError('bad key');
+    const file = media.audioPath(req.params.key);
+    if (!file) return reply.status(404).send({ error: 'not ready' });
+    // The key changes whenever the source file does, so the levels for a key never change.
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    return reply.type('application/octet-stream').send(await fs.promises.readFile(file));
+  });
+
   app.post<IdParams>('/api/devices/:id/media/proxy', async (req) => {
     const { device, state } = ctxFor(req.params.id);
     const b = req.body as { slot: number; file: string };
