@@ -13,6 +13,7 @@ import type { Device, NasBookmark, NasHost } from '../lib/types';
 export function NasSettings({ device, notify }: { device: Device; notify: (m: string, kind?: 'ok' | 'err') => void }) {
   const [bookmarks, setBookmarks] = useState<NasBookmark[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [hosts, setHosts] = useState<NasHost[] | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -24,11 +25,22 @@ export function NasSettings({ device, notify }: { device: Device; notify: (m: st
   const [newPass, setNewPass] = useState('');
   const [adding, setAdding] = useState(false);
 
-  const load = useCallback(() => {
-    Promise.all([api.nasBookmarks(device.id), api.nasSelected(device.id)])
-      .then(([b, sel]) => { setBookmarks(b); setSelected(sel.url); })
-      .catch((e) => notify((e as Error).message));
-  }, [device.id, notify]);
+  const load = useCallback(async () => {
+    setLoadError(null);
+    const [b, sel] = await Promise.allSettled([api.nasBookmarks(device.id), api.nasSelected(device.id)]);
+    if (b.status === 'fulfilled') {
+      setBookmarks(b.value);
+    } else {
+      setBookmarks([]);
+      setLoadError((b.reason as Error).message);
+    }
+    if (sel.status === 'fulfilled') {
+      setSelected(sel.value.url);
+    } else if (b.status === 'fulfilled') {
+      // Bookmarks loaded fine but "selected" failed — still worth surfacing.
+      setLoadError((sel.reason as Error).message);
+    }
+  }, [device.id]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -110,7 +122,13 @@ export function NasSettings({ device, notify }: { device: Device; notify: (m: st
       </p>
 
       {bookmarks === null && <p className="muted small">Reading…</p>}
-      {bookmarks?.length === 0 && <p className="muted small">No NAS mappings on this deck yet.</p>}
+      {loadError && (
+        <p className="error small">
+          Couldn't read the deck's NAS mappings: {loadError}
+          {' '}<button type="button" className="btn small ghost" onClick={load}>Retry</button>
+        </p>
+      )}
+      {bookmarks && bookmarks.length === 0 && !loadError && <p className="muted small">No NAS mappings on this deck yet.</p>}
 
       {bookmarks && bookmarks.length > 0 && (
         <ul className="nas-list">
