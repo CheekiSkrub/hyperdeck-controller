@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { DeviceForm } from './components/DeviceForm';
 import { DeviceList } from './components/DeviceList';
 import { DeviceView } from './components/DeviceView';
-import { useDevices, useServerConnected } from './lib/store';
+import { api } from './lib/api';
+import { DEMO_BANNER, useDevices, useServerConnected } from './lib/store';
 import type { Device } from './lib/types';
 
 function useHashDevice(): [string | null, (id: string | null) => void] {
@@ -22,6 +23,10 @@ export function App() {
   const [selectedId, select] = useHashDevice();
   const [editing, setEditing] = useState<Device | 'new' | null>(null);
   const selected = devices.find((d) => d.id === selectedId) ?? null;
+  const [ffmpegMissing, setFfmpegMissing] = useState(false);
+  useEffect(() => {
+    api.info().then((i) => setFfmpegMissing(!i.ffmpeg.ok)).catch(() => {});
+  }, [online]);
 
   // Default to the first device once the list arrives.
   useEffect(() => {
@@ -43,6 +48,13 @@ export function App() {
       </aside>
 
       <main className="main">
+        {DEMO_BANNER && <div className="demo-banner" role="note">{DEMO_BANNER}</div>}
+        {ffmpegMissing && (
+          <div className="demo-banner warn" role="alert">
+            ffmpeg wasn't found, so thumbnails and scrubbing are off (deck control still works). Put ffmpeg and ffprobe next to the app,
+            or on Windows run <code>winget install Gyan.FFmpeg</code>, then restart HyperDeck Controller.
+          </div>
+        )}
         {selected ? (
           <DeviceView key={selected.id} device={selected} onEdit={() => setEditing(selected)} />
         ) : (

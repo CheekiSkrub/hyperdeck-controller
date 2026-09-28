@@ -13,7 +13,8 @@
     "build": "npm run build --workspace web && npm run build --workspace server",
     "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web",
     "test": "npm test --workspace server",
-    "package": "node scripts/build-sea.mjs"
+    "package": "node scripts/build-sea.mjs",
+    "demo": "node scripts/build-demo.mjs"
   },
   "devDependencies": {
     "concurrently": "^10.0.5",

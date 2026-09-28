@@ -40,5 +40,5 @@ export const api = {
     `/api/devices/${id}/media/frame?${q(slot, file)}&frame=${frame}&h=${h}`,
   stripTileUrl: (key: string, i: number) => `/api/media/strip/${key}/${i}`,
   proxyUrl: (key: string) => `/api/media/proxy/${key}/video.mp4`,
-  downloadUrl: (id: string, slot: number, file: string) => `/api/devices/${id}/media/download?${q(slot, file)}`,
+  downloadUrl: (id: string, slot: number, file: string): string | null => `/api/devices/${id}/media/download?${q(slot, file)}`,
 };

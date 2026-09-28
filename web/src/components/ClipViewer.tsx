@@ -301,7 +301,9 @@ export function ClipViewer({ device, clip, onClose, notify }: {
                 {proxy?.state === 'error' ? 'Retry proxy' : 'Make proxy'}
               </button>
             )}
-            <a className="btn small ghost" href={api.downloadUrl(device.id, clip.slotId, clip.file)} download>Download original</a>
+            {api.downloadUrl(device.id, clip.slotId, clip.file) && (
+              <a className="btn small ghost" href={api.downloadUrl(device.id, clip.slotId, clip.file)!} download>Download original</a>
+            )}
           </div>
           {proxy?.state === 'error' && proxy.error && <p className="error small">Proxy failed: {proxy.error}</p>}
         </div>

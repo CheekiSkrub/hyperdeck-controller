@@ -10,6 +10,9 @@ type MediaEvent =
   | { type: 'strip'; deviceId: string; key: string; index: number; done?: boolean }
   | { type: 'proxy'; deviceId: string; key: string; state: string; progress: number; error?: string };
 
+/** Shown across the top of the panel; set only in the browser demo build. */
+export const DEMO_BANNER: string | null = null;
+
 let devices: Device[] = [];
 let connected = false;
 const listeners = new Set<Listener>();

@@ -6,3 +6,4 @@ release/
 .DS_Store
 tools/.mock-media/
 .dev-data/
+web/dist-demo/

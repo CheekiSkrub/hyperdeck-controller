@@ -14,6 +14,9 @@
  *   FFMPEG_DIR   folder containing ffmpeg + ffprobe to bundle (otherwise the
  *                ffmpeg-static / ffprobe-static npm packages are used)
  *   SKIP_FFMPEG  set to 1 to produce a build without bundled ffmpeg
+ *   TARGET_NODE / TARGET_PLATFORM / TARGET_ARCH
+ *                cross-build using another platform's node binary (it must be
+ *                the same Node version as the one running this script)
  */
 import { execFileSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -24,8 +27,10 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-const platform = process.platform;
-const arch = process.arch;
+const host = process.platform;
+const platform = process.env.TARGET_PLATFORM ?? process.platform;
+const arch = process.env.TARGET_ARCH ?? process.arch;
+const nodeBinary = process.env.TARGET_NODE ?? process.execPath;
 const exe = platform === 'win32' ? '.exe' : '';
 const name = `hyperdeck-controller-${pkg.version}-${platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux'}-${arch}`;
 const outDir = path.join(root, 'release', name);
@@ -71,19 +76,19 @@ run(`"${process.execPath}" --experimental-sea-config "${path.join(work, 'sea-con
 
 // 4. Copy the node binary and inject the blob
 const target = path.join(outDir, `hyperdeck-controller${exe}`);
-fs.copyFileSync(process.execPath, target);
+fs.copyFileSync(nodeBinary, target);
 fs.chmodSync(target, 0o755);
-if (platform === 'darwin') execFileSync('codesign', ['--remove-signature', target], { stdio: 'inherit' });
-if (platform === 'win32') {
+if (platform === 'darwin' && host === 'darwin') execFileSync('codesign', ['--remove-signature', target], { stdio: 'inherit' });
+if (platform === 'win32' && host === 'win32') {
   // Strip the official Node signature so the injected binary can be re-signed cleanly.
   try { execFileSync('signtool', ['remove', '/s', target], { stdio: 'inherit' }); } catch { /* signtool optional here */ }
 }
-const postject = path.join(root, 'node_modules', '.bin', `postject${platform === 'win32' ? '.cmd' : ''}`);
+const postject = path.join(root, 'node_modules', '.bin', `postject${host === 'win32' ? '.cmd' : ''}`);
 const postjectArgs = [target, 'NODE_SEA_BLOB', seaConfig.output, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2'];
 if (platform === 'darwin') postjectArgs.push('--macho-segment-name', 'NODE_SEA');
-execFileSync(postject, postjectArgs, { stdio: 'inherit', shell: platform === 'win32' });
+execFileSync(postject, postjectArgs, { stdio: 'inherit', shell: host === 'win32' });
 // Ad-hoc sign on macOS so it runs locally; CI replaces this with a Developer ID signature.
-if (platform === 'darwin') execFileSync('codesign', ['--sign', '-', target], { stdio: 'inherit' });
+if (platform === 'darwin' && host === 'darwin') execFileSync('codesign', ['--sign', '-', target], { stdio: 'inherit' });
 
 // 5. Bundle ffmpeg + ffprobe
 if (!process.env.SKIP_FFMPEG) {

@@ -23,6 +23,10 @@ Open http://localhost:5173. For the mock, add a device with IP `127.0.0.1` and s
 
 Requires Node 22.12+ and ffmpeg/ffprobe on PATH for development. Release builds bundle ffmpeg.
 
+## Browser demo
+
+`npm run demo` builds `web/dist-demo/hyperdeck-demo.html`. It's the real panel running against simulated decks entirely in the browser, which is useful for UI work and for showing people the panel without hardware.
+
 ## Build a release
 
 ```bash

@@ -255,3 +255,11 @@ h2 { font-size: 16px; }
 .form fieldset { min-width: 0; }
 .form fieldset > .btn { align-self: flex-start; }
 .shuttle input { accent-color: #7a8594; }
+
+.demo-banner {
+  margin: 16px 28px 0; padding: 10px 14px; border-radius: 8px; font-size: 13px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+@media (max-width: 860px) { .demo-banner { margin: 16px 16px 0; } }
+@media (max-width: 860px) { .shuttle input { width: min(260px, 42vw); } .transport-options { gap: 12px; } }
+.demo-banner.warn { background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
