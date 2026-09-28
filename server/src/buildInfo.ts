@@ -14,6 +14,9 @@ export interface BuildInfo {
   builtAt: string;
 }
 
+/** True when running from source (tsx watch / npm run dev) rather than a built bundle. */
+export const isDevBuild = typeof __APP_VERSION__ === 'undefined';
+
 /**
  * Packaged builds get these baked in by server/build.mjs. In dev (tsx watch) nothing is
  * baked in, so read the root package.json and ask git directly — each tsx restart re-reads

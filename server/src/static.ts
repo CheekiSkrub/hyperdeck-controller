@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import type { FastifyInstance } from 'fastify';
+import { isDevBuild } from './buildInfo.js';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -18,8 +19,22 @@ const TYPES: Record<string, string> = {
  * Serves the built web panel. In a packaged single-executable build the files
  * are embedded as a SEA asset ("web.json": path -> base64); in development they
  * are read from web/dist.
+ *
+ * In dev (npm run dev), web/dist is whatever was last built — often hours old — while the
+ * live panel is the Vite dev server on :5173. So local browsers are redirected there rather
+ * than handed a stale copy. Other machines still get web/dist, since Vite only listens on
+ * localhost. Set HDC_WEB_DIR to opt out and serve a specific build.
  */
 export function registerStatic(app: FastifyInstance) {
+  if (isDevBuild && !process.env.HDC_WEB_DIR) {
+    const vitePort = Number(process.env.HDC_VITE_PORT) || 5173;
+    app.addHook('onRequest', async (req, reply) => {
+      if (req.method !== 'GET' || req.url.startsWith('/api/') || req.url.startsWith('/ws')) return;
+      if (!['localhost', '127.0.0.1', '::1', '[::1]'].includes(req.hostname)) return;
+      const host = req.hostname.includes(':') && !req.hostname.startsWith('[') ? `[${req.hostname}]` : req.hostname;
+      return reply.redirect(`http://${host}:${vitePort}${req.url}`, 302);
+    });
+  }
   const files = loadEmbedded() ?? loadFromDisk();
   if (!files) {
     app.get('/', async (_req, reply) => reply.type('text/html').send(
