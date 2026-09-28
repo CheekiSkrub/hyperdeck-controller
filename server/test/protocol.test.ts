@@ -40,6 +40,13 @@ test('disk list keeps spaces in file names', () => {
   assert.equal(clips[1].duration, '01:02:03:04');
 });
 
+test('clip names keep runs of spaces verbatim', () => {
+  const { clips } = parseDiskList(['1: 20250220_Test  1_0001.mp4 H.264High 1080p50 00:05:00:00']);
+  assert.equal(clips[0].name, '20250220_Test  1_0001.mp4');
+  assert.equal(parseClipsGet(['1: Test  1.mp4 00:00:00:00 00:00:10:00'])[0].name, 'Test  1.mp4');
+  assert.equal(parseClipsGet(['1: 00:00:00:00 00:00:05:00 00:00:00:00 00:00:05:00 nas/Test  1.mp4'])[0].name, 'nas/Test  1.mp4');
+});
+
 test('clips get parses v1 and v3', () => {
   const v1 = parseClipsGet(['clip count: 1', '1: My Clip 00:00:00:00 00:00:10:00']);
   assert.deepEqual(v1[0], { id: 1, name: 'My Clip', startTimecode: '00:00:00:00', duration: '00:00:10:00' });

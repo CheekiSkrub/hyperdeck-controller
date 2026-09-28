@@ -179,15 +179,11 @@ export function parseDiskList(lines: string[]): { slotId: number | null; clips: 
   for (const line of lines) {
     const sm = /^slot id:\s*(\d+)/.exec(line);
     if (sm) { slotId = Number(sm[1]); continue; }
-    const m = /^(\d+):\s+(.+)$/.exec(line);
+    // Peel the three fields off the end and keep the name verbatim — file names can contain
+    // runs of spaces ("Test  1.mp4"), and collapsing them means the file can't be found.
+    const m = /^(\d+):\s+(.*?\S)\s+(\S+)\s+(\S+)\s+(\S+)\s*$/.exec(line);
     if (!m) continue;
-    const parts = m[2].trim().split(/\s+/);
-    if (parts.length < 4) continue;
-    const duration = parts.pop()!;
-    const videoFormat = parts.pop()!;
-    const fileFormat = parts.pop()!;
-    const name = parts.join(' ');
-    clips.push({ index: Number(m[1]), name, fileFormat, videoFormat, duration });
+    clips.push({ index: Number(m[1]), name: m[2], fileFormat: m[3], videoFormat: m[4], duration: m[5] });
   }
   return { slotId, clips };
 }
@@ -212,18 +208,17 @@ const TC = /^\d{2}:\d{2}:\d{2}[:;]\d{2}$/;
 export function parseClipsGet(lines: string[]): TimelineClip[] {
   const clips: TimelineClip[] = [];
   for (const line of lines) {
-    const m = /^(\d+):\s+(.+)$/.exec(line);
+    // Names are kept verbatim (runs of spaces included) — see parseDiskList.
+    const m = /^(\d+):\s+(.*?)\s*$/.exec(line);
     if (!m) continue;
     const id = Number(m[1]);
-    const parts = m[2].trim().split(/\s+/);
-    if (parts.length >= 5 && TC.test(parts[0]) && TC.test(parts[1]) && TC.test(parts[2]) && TC.test(parts[3])) {
-      const name = m[2].trim().split(/\s+/).slice(4).join(' ');
-      clips.push({ id, startTimecode: parts[0], duration: parts[1], inTimecode: parts[2], outTimecode: parts[3], name });
-    } else if (parts.length >= 3) {
-      const duration = parts.pop()!;
-      const start = parts.pop()!;
-      clips.push({ id, name: parts.join(' '), startTimecode: start, duration });
+    const v3 = /^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+)$/.exec(m[2]);
+    if (v3 && TC.test(v3[1]) && TC.test(v3[2]) && TC.test(v3[3]) && TC.test(v3[4])) {
+      clips.push({ id, startTimecode: v3[1], duration: v3[2], inTimecode: v3[3], outTimecode: v3[4], name: v3[5] });
+      continue;
     }
+    const v1 = /^(.*?\S)\s+(\S+)\s+(\S+)$/.exec(m[2]);
+    if (v1) clips.push({ id, name: v1[1], startTimecode: v1[2], duration: v1[3] });
   }
   return clips;
 }

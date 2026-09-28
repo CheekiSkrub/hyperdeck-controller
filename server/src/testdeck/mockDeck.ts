@@ -124,7 +124,7 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
   function scanSlotFiles(dir: string): MockFile[] {
     let names: string[];
     try {
-      names = fs.readdirSync(dir).filter((f) => /\.(mov|mp4|mxf|m4v)$/i.test(f)).sort();
+      names = fs.readdirSync(dir).filter((f) => !f.startsWith('.') && /\.(mov|mp4|mxf|m4v)$/i.test(f)).sort(); // skip hidden stubs (._AppleDouble, partial recordings)
     } catch {
       return [];
     }
