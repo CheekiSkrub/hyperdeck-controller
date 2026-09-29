@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 
 const MOVING = new Set(['play', 'forward', 'rewind', 'shuttle']);
-/** How far ahead of the last deck report we're willing to run (seconds). */
-const MAX_LEAD = 0.5;
+/** How far ahead of the last deck report we're willing to run (seconds). Decks that only report
+ *  position when polled (server/src/hyperdeck/client.ts pollPosition) answer every ~250 ms. */
+const MAX_LEAD = 1;
 
 /**
  * A frame counter that advances every video frame between deck reports.

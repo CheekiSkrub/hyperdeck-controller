@@ -93,6 +93,9 @@ export class MediaService extends EventEmitter {
    *  pool every clip on the timeline filling its strip used to queue up behind — and hold up —
    *  thumbnails and the exact frames the scrubber is waiting on. */
   private stripSems = new Map<string, PrioritySemaphore>();
+  /** Clip-browser thumbnails (probe + one frame each) likewise: on a NAS a probe alone can take
+   *  0.6-2.5 s, so a 70-clip folder through the deck's 2-slot pool took ~2 minutes to fill in. */
+  private thumbSems = new Map<string, PrioritySemaphore>();
   /** relPath|size|mtime -> when it last failed to probe/decode, so a corrupt or unreadable
    *  file on a network share isn't retried on every scroll/refresh. */
   private netFailures = new Map<string, number>();
@@ -116,6 +119,12 @@ export class MediaService extends EventEmitter {
   private stripSem(deviceId: string) {
     let s = this.stripSems.get(deviceId);
     if (!s) this.stripSems.set(deviceId, (s = new PrioritySemaphore(Math.max(4, this.opts.concurrency * 2))));
+    return s;
+  }
+
+  private thumbSem(deviceId: string) {
+    let s = this.thumbSems.get(deviceId);
+    if (!s) this.thumbSems.set(deviceId, (s = new PrioritySemaphore(Math.max(4, this.opts.concurrency * 2))));
     return s;
   }
 
@@ -145,7 +154,7 @@ export class MediaService extends EventEmitter {
   }
 
   /** Locate + probe a clip (cached ~30s in memory, probe cached on disk). */
-  async media(device: Device, state: HyperDeckState, ref: ClipRef): Promise<ClipMedia> {
+  async media(device: Device, state: HyperDeckState, ref: ClipRef, pool: 'main' | 'thumb' = 'main'): Promise<ClipMedia> {
     const rkey = `${device.id}|${ref.slotId}|${ref.file}`;
     const hit = this.resolved.get(rkey);
     if (hit && Date.now() - hit.at < 30_000) return hit.media;
@@ -160,7 +169,7 @@ export class MediaService extends EventEmitter {
       try {
         p = JSON.parse(await fs.promises.readFile(probeFile, 'utf8'));
       } catch {
-        p = await this.sem(device.id).run(PRIO.probe, () => probe(source.input));
+        p = await (pool === 'thumb' ? this.thumbSem(device.id) : this.sem(device.id)).run(PRIO.probe, () => probe(source.input));
         await fs.promises.writeFile(probeFile, JSON.stringify(p));
       }
       return { key, source, probe: p };
@@ -207,12 +216,12 @@ export class MediaService extends EventEmitter {
   }
 
   async thumbnail(device: Device, state: HyperDeckState, ref: ClipRef): Promise<string> {
-    const m = await this.media(device, state, ref);
+    const m = await this.media(device, state, ref, 'thumb');
     const file = path.join(this.dir(m.key), 'thumb.jpg');
     if (fs.existsSync(file)) return file;
     // A second or so in avoids black frames from fades / record start.
     const t = Math.min(1, Math.max(0, m.probe.duration / 10));
-    const buf = await this.sem(device.id).run(PRIO.thumb, () => grabFrame(m.source.input, t, THUMB_HEIGHT));
+    const buf = await this.thumbSem(device.id).run(PRIO.thumb, () => grabFrame(m.source.input, t, THUMB_HEIGHT));
     await fs.promises.writeFile(file, buf);
     return file;
   }

@@ -6,6 +6,8 @@ import {
   type DiskClip, type HyperDeckResponse, type SlotInfo, type TimelineClip, type TransportInfo,
 } from './protocol.js';
 
+
+const MOVING_STATES = new Set(['play', 'forward', 'rewind', 'shuttle', 'jog']);
 export const HYPERDECK_PORT = 9993;
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
@@ -66,6 +68,10 @@ export class HyperDeckClient extends EventEmitter {
   private stateTimer: NodeJS.Timeout | null = null;
   private transportTimer: NodeJS.Timeout | null = null;
   private lastTransportEmit = 0;
+  /** Fallback position polling while the deck moves (see pollPosition). */
+  private positionTimer: NodeJS.Timeout | null = null;
+  private lastPositionAt = 0;
+  private polling = false;
 
   readonly state: HyperDeckState = {
     status: 'disconnected', info: null, transport: null, slots: [], disks: {}, timeline: [], remote: null, nasUrl: null, edit: [],
@@ -92,6 +98,7 @@ export class HyperDeckClient extends EventEmitter {
     this.closed = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
+    if (this.positionTimer) clearInterval(this.positionTimer);
     this.socket?.destroy();
     this.socket = null;
   }
@@ -163,6 +170,7 @@ export class HyperDeckClient extends EventEmitter {
       this.parser.reset();
       this.failAll(new Error('Connection closed'));
       if (this.pingTimer) clearInterval(this.pingTimer);
+      if (this.positionTimer) clearInterval(this.positionTimer);
       this.setStatus('disconnected');
       if (!this.closed) {
         this.reconnectTimer = setTimeout(() => this.open(), this.backoff);
@@ -236,6 +244,7 @@ export class HyperDeckClient extends EventEmitter {
         break;
       case 516:
         if (this.state.transport && r.params.timeline) this.state.transport.timeline = Number(r.params.timeline);
+        this.lastPositionAt = Date.now();
         break;
       default:
         break;
@@ -269,6 +278,8 @@ export class HyperDeckClient extends EventEmitter {
       this.pingTimer = setInterval(() => {
         this.send('ping').catch(() => this.socket?.destroy());
       }, 10000);
+      if (this.positionTimer) clearInterval(this.positionTimer);
+      this.positionTimer = setInterval(() => void this.pollPosition(), 250);
     } catch (err) {
       this.state.lastError = (err as Error).message;
       this.emitState();
@@ -292,6 +303,25 @@ export class HyperDeckClient extends EventEmitter {
     await this.refreshNas().catch(() => {});
     await this.refreshTimeline().catch(() => {});
     this.emitState();
+  }
+
+  /**
+   * Some firmware (seen on a Shuttle HD, 8.4.1) accepts `notify: timeline position` but doesn't
+   * send position updates while playing, so the panel's playhead ran out of extrapolation and
+   * stopped. While the deck is moving and no position has arrived for half a second, ask for it.
+   */
+  private async pollPosition(): Promise<void> {
+    const t = this.state.transport;
+    if (!t || this.polling || !MOVING_STATES.has(t.status) || Date.now() - this.lastPositionAt < 500) return;
+    this.polling = true;
+    try {
+      const r = await this.send('transport info', undefined, 1000);
+      this.state.transport = parseTransportInfo(r.params, this.state.transport ?? undefined);
+      this.lastPositionAt = Date.now();
+      this.emitTransport();
+    } catch { /* next tick retries */ } finally {
+      this.polling = false;
+    }
   }
 
   async refreshTransport(): Promise<void> {
