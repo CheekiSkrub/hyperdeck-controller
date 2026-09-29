@@ -283,7 +283,7 @@ export class HyperDeckClient extends EventEmitter {
         // Seen on a Shuttle HD (8.4.1) after reselecting its NAS: a slot notification with no
         // slot id. Don't file it under a bogus "slot null" — re-read every slot instead.
         if (!Number.isInteger(id) || id < 1) {
-          void this.refreshSlots().then(() => this.emitState()).catch(() => {});
+          void this.refreshSlots().then(() => { this.emitState(); this.scheduleDiskRefresh(); }).catch(() => {});
           void this.refreshNas().catch(() => {});
           break;
         }
@@ -326,6 +326,11 @@ export class HyperDeckClient extends EventEmitter {
     this.diskTimer = setTimeout(() => {
       this.diskTimer = null;
       for (const s of this.state.slots) if (s.status === 'mounted') void this.refreshDisk(s.slotId).catch(() => {});
+      // Re-read transport too: while a NAS remounts the deck reports "slot id: none" and doesn't
+      // always send a new transport notification once the slot is back (seen on a Shuttle HD),
+      // leaving us with no active slot — no clips, thumbnails or cueing — until something else
+      // happened to refresh it.
+      void this.refreshTransport().catch(() => {});
     }, 500);
   }
 
