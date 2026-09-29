@@ -121,40 +121,60 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
    *  file on a real share shouldn't take the slot listing down), and the scan is capped so a huge
    *  real folder doesn't hang the deck.
    */
-  function scanSlotFiles(dir: string): MockFile[] {
+  //
+  // Asynchronous on purpose: this runs inside the app's own server process, and it used to probe
+  // each file with two blocking ffprobe calls. On a real NAS folder (~70 files) that froze the
+  // whole server for 15 s+ on every start and every NAS reselect — real decks' replies then sat
+  // unread until their commands timed out. One probe per file, a few at a time, cached by
+  // path/size/mtime so a rescan of an unchanged folder costs a directory listing.
+  const probeCache = new Map<string, { key: string; file: MockFile | null }>();
+  async function scanSlotFiles(dir: string): Promise<MockFile[]> {
     let names: string[];
     try {
-      names = fs.readdirSync(dir).filter((f) => !f.startsWith('.') && /\.(mov|mp4|mxf|m4v)$/i.test(f)).sort(); // skip hidden stubs (._AppleDouble, partial recordings)
+      names = (await fs.promises.readdir(dir)).filter((f) => !f.startsWith('.') && /\.(mov|mp4|mxf|m4v)$/i.test(f)).sort(); // skip hidden stubs (._AppleDouble, partial recordings)
     } catch {
       return [];
     }
-    const out: MockFile[] = [];
-    for (const f of names.slice(0, 300)) {
-      try {
+    names = names.slice(0, 300);
+    const results: (MockFile | null)[] = new Array(names.length).fill(null);
+    let next = 0;
+    const worker = async () => {
+      while (next < names.length) {
+        const i = next++;
+        const f = names[i];
         const full = path.join(dir, f);
-        // stdio: 'pipe' on stderr too — execFileSync forwards a failing child's stderr straight
-        // to this process's own stderr by default, which otherwise floods the server console
-        // with ffprobe's raw diagnostic output for every corrupt/partial file on a real share.
-        const probeOpts: { stdio: ['ignore', 'pipe', 'pipe'] } = { stdio: ['ignore', 'pipe', 'pipe'] };
-        const d = Number(execFileSync(opts.ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', full], probeOpts).toString().trim());
-        const tcTag = execFileSync(opts.ffprobe, ['-v', 'error', '-show_entries', 'stream_tags=timecode:format_tags=timecode', '-of', 'default=nw=1:nk=1', full], probeOpts).toString().trim().split('\n')[0] ?? '';
-        const m = /(\d+):(\d+):(\d+)[:;](\d+)/.exec(tcTag);
-        const tcStart = m ? ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * FPS + Number(m[4]) : 0;
-        out.push({ name: f, frames: Math.round((d || 0) * FPS), format: /\.mp4$/i.test(f) ? 'H.264High' : 'QuickTimeProRes', tcStart });
-      } catch {
-        // unreadable/unprobeable file on a real share — skip it rather than failing the listing
+        try {
+          const st = await fs.promises.stat(full);
+          const key = `${st.size}|${st.mtimeMs}`;
+          const hit = probeCache.get(full);
+          if (hit?.key === key) { results[i] = hit.file; continue; }
+          let file: MockFile | null = null;
+          try {
+            const { stdout } = await execFileAsync(opts.ffprobe, ['-v', 'error', '-show_entries', 'format=duration:stream_tags=timecode:format_tags=timecode', '-of', 'json', full], { timeout: 15000 });
+            const j = JSON.parse(stdout) as { format?: { duration?: string; tags?: { timecode?: string } }; streams?: { tags?: { timecode?: string } }[] };
+            const tcTag = j.streams?.map((s) => s.tags?.timecode).find(Boolean) ?? j.format?.tags?.timecode ?? '';
+            const m = /(\d+):(\d+):(\d+)[:;](\d+)/.exec(tcTag);
+            const tcStart = m ? ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * FPS + Number(m[4]) : 0;
+            file = { name: f, frames: Math.round((Number(j.format?.duration) || 0) * FPS), format: /\.mp4$/i.test(f) ? 'H.264High' : 'QuickTimeProRes', tcStart };
+          } catch {
+            // unreadable/unprobeable file on a real share — skip it rather than failing the listing
+          }
+          probeCache.set(full, { key, file });
+          results[i] = file;
+        } catch { /* vanished between listing and stat */ }
       }
-    }
-    return out;
+    };
+    await Promise.all(Array.from({ length: 4 }, worker));
+    return results.filter((x): x is MockFile => x !== null);
   }
 
-  function prepareMedia() {
+  async function prepareMedia() {
     if (verbose) console.log('[mock] preparing test clips…');
     makeClip(slots[1].dir, 'Studio Cam A_0001.mov', seconds.camA, '10:00:00:00', 'testsrc2', 'prores');
     makeClip(slots[1].dir, 'Studio Cam A_0002.mov', Math.max(2, Math.round(seconds.camA * 0.6)), '10:05:00:00', 'smptehdbars', 'prores');
     makeClip(slots[2].dir, 'Interview_0001.mp4', seconds.interview, '11:00:00:00', 'rgbtestsrc', 'h264');
     makeClip(slots[3].dir, 'NAS Record_0001.mov', seconds.nas, '12:00:00:00', 'testsrc', 'prores');
-    for (const s of Object.values(slots)) s.files = scanSlotFiles(s.dir);
+    for (const s of Object.values(slots)) s.files = await scanSlotFiles(s.dir);
   }
 
   // ------------------------------------------------------- NAS slot 3 <-> selected bookmark
@@ -195,7 +215,7 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
       const connected = await connectNas(shareRoot, bm?.username, bm?.password);
       if (connected) {
         try {
-          fs.accessSync(target, fs.constants.R_OK);
+          await fs.promises.access(target, fs.constants.R_OK);
           dir = target;
         } catch {
           // not reachable from this host — fall back to the demo clip below
@@ -204,7 +224,9 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     }
     if (seq !== refreshSeq) return; // superseded by a newer selection change
     slots[3].dir = dir;
-    slots[3].files = scanSlotFiles(dir);
+    const files = await scanSlotFiles(dir);
+    if (seq !== refreshSeq) return; // superseded while scanning
+    slots[3].files = files;
     // Deliberately does NOT touch deck.timeline/rebuildTimeline() here: changing which NAS
     // bookmark is selected should only update what's *available* to browse/load from slot 3,
     // not silently dump every clip on a (possibly large, messy) real share onto the deck's
@@ -486,7 +508,7 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
     }
   }
 
-  prepareMedia();
+  await prepareMedia();
   rebuildTimeline();
 
   const port = opts.port && opts.port > 0 ? opts.port : await getFreePort(host);

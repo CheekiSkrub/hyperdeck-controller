@@ -11,7 +11,7 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
     });
     if (res.status === 204) return undefined as T;
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error ?? `${res.status} ${res.statusText}`);
+    if (!res.ok) throw Object.assign(new Error(data.error ?? `${res.status} ${res.statusText}`), { code: data.code as string | undefined });
     return data as T;
   } finally {
     end();
@@ -79,7 +79,7 @@ export const api = {
   liveUrl: (id: string, slot: number, file: string, seconds: number): string | null =>
     `/api/devices/${id}/media/live?${q(slot, file)}&t=${seconds.toFixed(3)}`,
   clips: (id: string) => req<ClipListing[]>('GET', `/api/devices/${id}/clips`),
-  load: (id: string, body: { slotId: number; file: string; frame: number; play?: boolean; singleClip?: boolean }) =>
+  load: (id: string, body: { slotId: number; file: string; frame: number; play?: boolean; singleClip?: boolean; replace?: boolean }) =>
     req<TransportInfo>('POST', `/api/devices/${id}/load`, body),
 
   mediaInfo: (id: string, slot: number, file: string) => req<MediaInfo>('GET', `/api/devices/${id}/media/info?${q(slot, file)}`),

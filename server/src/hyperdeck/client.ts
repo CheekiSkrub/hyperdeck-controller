@@ -63,8 +63,8 @@ const REPLY_TITLES: Record<string, string> = {
   'nas selected': 'nas info',
   configuration: 'configuration',
 };
-/** How long a timed-out command's reply may still turn up late. */
-const ORPHAN_MS = 15_000;
+/** After a command times out, how long to hold the next one back in case its reply turns up late. */
+const LATE_REPLY_GRACE_MS = 2000;
 
 /**
  * A resilient connection to one HyperDeck. Commands are serialised (the deck
@@ -89,12 +89,16 @@ export class HyperDeckClient extends EventEmitter {
   private lastPositionAt = 0;
   private polling = false;
   /**
-   * Commands that timed out without a reply. Replies are paired with commands purely in order, so
-   * a reply that arrives after its command gave up would otherwise be taken as the answer to the
-   * NEXT command and shift every pairing after it by one — seen on a Shuttle HD while its NAS
-   * remounted: "slot info: slot id: 2" got some other reply and became a phantom "Slot null".
+   * Replies are paired with commands purely in order (one in flight at a time), so a reply that
+   * arrives after its command gave up would be taken as the answer to the NEXT command and shift
+   * every pairing after it by one — seen on a Shuttle HD while its NAS remounted: "slot info: slot
+   * id: 2" got some other reply and became a phantom "Slot null". So after a timeout nothing is
+   * sent for a short grace period: any reply arriving then can only be the late one and is dropped.
    */
-  private orphans: number[] = [];
+  /** Recent protocol traffic for diagnosing real decks (GET /api/devices/:id/debug/protocol). */
+  readonly trace: string[] = [];
+  private quietUntil = 0;
+  private quietTimer: NodeJS.Timeout | null = null;
 
   readonly state: HyperDeckState = {
     status: 'disconnected', info: null, transport: null, slots: [], disks: {}, timeline: [], remote: null, nasUrl: null, edit: [],
@@ -141,9 +145,9 @@ export class HyperDeckClient extends EventEmitter {
       p.timer = setTimeout(() => {
         if (this.inFlight === p) {
           this.inFlight = null;
-          this.orphans.push(Date.now());
+          this.log(`! timeout: ${cmd.trim()}`);
           reject(new Error(`Timeout waiting for response to "${cmd.trim()}"`));
-          this.pump();
+          this.holdForLateReply();
         } else {
           this.queue = this.queue.filter((q) => q !== p);
           reject(new Error(`Timeout queued command "${cmd.trim()}"`));
@@ -192,7 +196,7 @@ export class HyperDeckClient extends EventEmitter {
       if (this.socket !== sock) return;
       this.socket = null;
       this.parser.reset();
-      this.orphans = [];
+      this.endQuiet();
       this.failAll(new Error('Connection closed'));
       if (this.pingTimer) clearInterval(this.pingTimer);
       if (this.positionTimer) clearInterval(this.positionTimer);
@@ -214,27 +218,49 @@ export class HyperDeckClient extends EventEmitter {
     }
   }
 
+  private holdForLateReply(): void {
+    this.quietUntil = Date.now() + LATE_REPLY_GRACE_MS;
+    if (this.quietTimer) clearTimeout(this.quietTimer);
+    this.quietTimer = setTimeout(() => { this.endQuiet(); this.pump(); }, LATE_REPLY_GRACE_MS);
+  }
+
+  private endQuiet(): void {
+    this.quietUntil = 0;
+    if (this.quietTimer) clearTimeout(this.quietTimer);
+    this.quietTimer = null;
+  }
+
+  private log(line: string): void {
+    this.trace.push(`${new Date().toISOString().slice(11, 23)} ${line}`);
+    if (this.trace.length > 400) this.trace.splice(0, this.trace.length - 400);
+  }
+
   private pump(): void {
-    if (this.inFlight || !this.socket) return;
+    if (this.inFlight || !this.socket || Date.now() < this.quietUntil) return;
     const next = this.queue.shift();
     if (!next) return;
     this.inFlight = next;
+    this.log(`> ${next.cmd.trim().replace(/\n/g, ' | ')}`);
     this.socket.write(next.cmd);
   }
 
   private onResponse(r: HyperDeckResponse): void {
+    if (r.code !== 508 && r.code !== 515 && r.code !== 516) this.log(`< ${r.code} ${r.text}${r.lines.length ? ` (${r.lines.length} lines)` : ''}${this.inFlight ? '' : ' [nothing in flight]'}`);
     if (r.code >= 500 && r.code < 600) {
       if (r.code === 500) this.emit('_greeting', r);
       this.onAsync(r);
       return;
     }
     const p = this.inFlight;
-    const now = Date.now();
-    this.orphans = this.orphans.filter((t) => now - t < ORPHAN_MS);
-    if (this.orphans.length && (!p || !replyMatches(p.cmd, r))) {
-      this.orphans.shift(); // a late reply to a command that already timed out — not ours
+    if (!p) {
+      // Nothing in flight: the late reply to a command that timed out (or a stray). Drop it, and
+      // if we were holding the queue back for it, carry on now.
+      if (this.quietUntil) { this.endQuiet(); this.pump(); }
       return;
     }
+    // Belt and braces for queries, whose replies are recognisable: a successful reply under some
+    // other title isn't ours, so keep waiting for the real one.
+    if (r.code >= 200 && r.code < 300 && !replyMatches(p.cmd, r)) { this.log('  (not the reply to that — still waiting)'); return; }
     this.inFlight = null;
     if (p) {
       if (p.timer) clearTimeout(p.timer);
@@ -411,6 +437,22 @@ export class HyperDeckClient extends EventEmitter {
     this.emitState();
   }
 
+  /**
+   * Re-read the timeline until `done` says it reflects our changes (or `timeoutMs` passes).
+   * A Shuttle HD (8.4.1) answers `clips clear` / `clips add` with "200 ok" straight away but
+   * applies them later: `clips get` kept returning the old timeline for 0.5–1.5 s. Reading it
+   * once afterwards showed the previous state, so every edit looked one step behind.
+   */
+  async waitForTimeline(done: (t: TimelineClip[]) => boolean, timeoutMs = 6000): Promise<boolean> {
+    const until = Date.now() + timeoutMs;
+    for (;;) {
+      await this.refreshTimeline();
+      if (done(this.state.timeline)) return true;
+      if (Date.now() > until) return false;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+
   async refreshNas(): Promise<void> {
     try {
       const r = await this.send('nas selected');
@@ -447,14 +489,13 @@ export class HyperDeckClient extends EventEmitter {
 }
 
 /**
- * Could `r` be the reply to `cmd`? Read commands must come back under their own title (and, for
- * per-slot queries, the same slot id). Action commands just get "200 ok" or an error, which can't
- * be told apart, so while a late reply is outstanding those are assumed to be the late one.
+ * Could `r` be the reply to `cmd`? Queries come back under their own title (and, for per-slot
+ * queries, the same slot id); anything else (actions just get "200 ok") can't be checked.
  */
 function replyMatches(cmd: string, r: HyperDeckResponse): boolean {
   const name = cmd.split(/[:\n]/)[0].trim().toLowerCase();
   const title = REPLY_TITLES[name];
-  if (!title) return false;
+  if (!title) return true;
   if (r.text.trim().toLowerCase() !== title) return false;
   const wantSlot = /slot id:\s*(\d+)/i.exec(cmd)?.[1];
   return !wantSlot || !r.params['slot id'] || r.params['slot id'] === wantSlot;

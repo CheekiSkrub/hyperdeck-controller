@@ -199,7 +199,15 @@ export function ClipViewer({ device, clip, onClose, notify, editor, startFrame, 
   const cue = useCallback(async (play: boolean) => {
     setBusy(play ? 'play' : 'cue');
     try {
-      await api.load(device.id, { slotId: clip.slotId, file: clip.file, frame, play, singleClip });
+      const body = { slotId: clip.slotId, file: clip.file, frame, play, singleClip };
+      try {
+        await api.load(device.id, body);
+      } catch (e) {
+        // The deck's timeline holds one video format; offer to swap it for just this clip.
+        if ((e as { code?: string }).code !== 'format-mismatch') throw e;
+        if (!window.confirm(`${(e as Error).message}\n\nReplace the deck's timeline with just this clip?`)) return;
+        await api.load(device.id, { ...body, replace: true });
+      }
       notify(`${play ? 'Playing' : 'Cued'} ${clip.file} at ${framesToTc(frame, fps)}`, 'ok');
     } catch (e) {
       notify((e as Error).message);

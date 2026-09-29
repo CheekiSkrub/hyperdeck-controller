@@ -35,7 +35,7 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
 
   app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
     const status = err instanceof ValidationError ? 400 : err instanceof CommandError ? err.status : err.statusCode ?? 500;
-    reply.status(status).send({ error: err.message });
+    reply.status(status).send({ error: err.message, code: err instanceof CommandError ? err.code : undefined });
   });
 
   const clipRef = (req: FastifyRequest): ClipRef => {
@@ -139,6 +139,9 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     return devices.probe(String(b.host).trim(), Number(b.port) || 9993);
   });
 
+  app.get<IdParams>('/api/devices/:id/debug/protocol', async (req, reply) =>
+    reply.type('text/plain').send(devices.client(req.params.id).trace.join('\n')));
+
   app.put<IdParams>('/api/devices/:id/edit', async (req) => {
     return devices.setEdit(req.params.id, (req.body as { entries: unknown }).entries);
   });
@@ -194,7 +197,7 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
   });
 
   app.post<IdParams>('/api/devices/:id/load', async (req) => {
-    const b = req.body as { slotId: number; file: string; frame: number; play?: boolean; singleClip?: boolean };
+    const b = req.body as { slotId: number; file: string; frame: number; play?: boolean; singleClip?: boolean; replace?: boolean };
     if (!Number.isInteger(b.slotId) || !b.file) throw new ValidationError('slotId and file are required');
     return devices.loadClip(req.params.id, { ...b, frame: Number(b.frame) || 0 });
   });

@@ -6,7 +6,7 @@ import { HyperDeckClient, HyperDeckError, type HyperDeckState } from '../hyperde
 import { HyperDeckRest } from '../hyperdeck/rest.js';
 import { deviceAction, readSettings, SettingError, writeSetting } from './settings.js';
 import { fpsFromVideoFormat, timecodeToFrames, type TransportInfo } from '../hyperdeck/protocol.js';
-import { applyEdit, EditError, validateEdit, type DerivedEntry } from './edit.js';
+import { applyEdit, EditError, editFromState, validateEdit, type DerivedEntry } from './edit.js';
 import * as nas from '../hyperdeck/nas.js';
 import type { Device, DeviceInput, DeviceStore } from './store.js';
 
@@ -45,7 +45,8 @@ const ALLOWED: Record<string, string[]> = {
 };
 
 export class CommandError extends Error {
-  constructor(message: string, public readonly status = 400) { super(message); }
+  /** `code` lets the panel react to specific failures (e.g. offer to replace the timeline). */
+  constructor(message: string, public readonly status = 400, public readonly code?: string) { super(message); }
 }
 
 export class DeviceManager extends EventEmitter {
@@ -300,7 +301,7 @@ export class DeviceManager extends EventEmitter {
     if (c.state.status !== 'connected') throw new CommandError('HyperDeck not connected', 409);
     try {
       await applyEdit(c, validateEdit(entries, c.state));
-      return c.state.edit;
+      return editFromState(c.state, c); // not c.state.edit: that's only recomputed ~100 ms after a change
     } catch (e) {
       if (e instanceof EditError) throw new CommandError(e.message, 409);
       throw toCommandError(e);
@@ -314,7 +315,7 @@ export class DeviceManager extends EventEmitter {
    *  3. goto the clip, then step forward N frames from its first frame
    *  4. optionally play (whole timeline or just this clip)
    */
-  async loadClip(id: string, opts: { slotId: number; file: string; frame: number; play?: boolean; singleClip?: boolean }): Promise<TransportInfo | null> {
+  async loadClip(id: string, opts: { slotId: number; file: string; frame: number; play?: boolean; singleClip?: boolean; replace?: boolean }): Promise<TransportInfo | null> {
     const c = this.client(id);
     try {
       let t = c.state.transport;
@@ -332,13 +333,31 @@ export class DeviceManager extends EventEmitter {
       // Find a timeline entry of this file that contains the frame (entries may be slices).
       const find = () => {
         const want = stripExt(opts.file);
-        const i = c.state.edit.findIndex((e) => stripExt(e.file) === want && frame >= e.in && frame < e.out);
-        return i >= 0 ? { id: i + 1, entry: c.state.edit[i] } : null;
+        // Derive afresh: c.state.edit is only recomputed ~100 ms after the timeline changes.
+        const edit = editFromState(c.state, c);
+        const i = edit.findIndex((e) => stripExt(e.file) === want && frame >= e.in && frame < e.out);
+        return i >= 0 ? { id: i + 1, entry: edit[i] } : null;
       };
       let hit = find();
       if (!hit) {
-        await c.send('clips add', { name: opts.file });
-        await c.refreshTimeline();
+        // A timeline holds one video format: the deck refuses a clip of another format with
+        // "103 unsupported" (or "109 out of range"). Say so plainly, and replace the timeline
+        // with just this clip when the user has confirmed that's what they want.
+        if (opts.replace) await c.send('clips clear');
+        try {
+          await c.send('clips add', { name: opts.file });
+        } catch (e) {
+          if (!(e instanceof HyperDeckError) || (e.code !== 103 && e.code !== 109)) throw e;
+          const disk = c.state.disks[opts.slotId] ?? [];
+          const mine = disk.find((d) => d.name === opts.file)?.videoFormat;
+          const theirs = disk.find((d) => c.state.timeline.some((t) => (t.name.split('/').pop() ?? t.name) === d.name))?.videoFormat
+            ?? c.state.transport?.videoFormat;
+          const why = mine && theirs && mine !== theirs ? `"${opts.file}" is ${mine} but the clips on the deck's timeline are ${theirs}` : `The deck refused "${opts.file}" (${e.code} ${e.text})`;
+          throw new CommandError(`${why}. A HyperDeck timeline can only hold one video format.`, 409, 'format-mismatch');
+        }
+        // The deck applies the add a moment after acknowledging it.
+        const base = (n: string) => stripExt(path.posix.basename(n.replace(/\\/g, '/')));
+        await c.waitForTimeline((tl) => tl.some((x) => base(x.name) === stripExt(opts.file)) && (!opts.replace || tl.length === 1));
         hit = find();
       }
       if (!hit) throw new CommandError(`"${opts.file}" is not on the HyperDeck timeline and could not be added`, 404);
