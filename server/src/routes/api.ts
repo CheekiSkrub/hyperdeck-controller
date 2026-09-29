@@ -261,8 +261,18 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
 
   app.get<IdParams>('/api/devices/:id/network-drives/sources', async (req) => {
     const d = devices.get(req.params.id);
-    const shareSources = d.shares.filter((s) => s.localPath.trim()).map((s) => ({ key: `share:${s.id}`, label: s.label }));
-    const credSources = ctx.credentials.list().filter((c) => c.path?.trim()).map((c) => ({ key: `credential:${c.id}`, label: c.label }));
+    // A source that IS the deck's selected NAS gets the deck's network slot: files at its root can
+    // be cued even when the deck's own disk list doesn't show them (`clips add` by name still works
+    // — seen on a Shuttle HD whose disk list went empty while the share stayed readable).
+    const state = devices.client(d.id).state;
+    const nas = normaliseShareUrl(state.nasUrl);
+    const netSlot = state.slots.find((s) => s.status === 'mounted' && locator.isNetworkSlot(d, state, s.slotId));
+    const deckSlotId = (...paths: (string | undefined)[]) =>
+      nas && netSlot && paths.some((p) => normaliseShareUrl(p) === nas) ? netSlot.slotId : undefined;
+    const shareSources = d.shares.filter((s) => s.localPath.trim())
+      .map((s) => ({ key: `share:${s.id}`, label: s.label, deckSlotId: deckSlotId(s.url, s.localPath) }));
+    const credSources = ctx.credentials.list().filter((c) => c.path?.trim())
+      .map((c) => ({ key: `credential:${c.id}`, label: c.label, deckSlotId: deckSlotId(c.path) }));
     return [...shareSources, ...credSources];
   });
 

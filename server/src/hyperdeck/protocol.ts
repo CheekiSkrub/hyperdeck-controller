@@ -147,6 +147,8 @@ export interface SlotInfo {
   blocked?: boolean;
   remainingSize?: number;
   totalSize?: number;
+  /** Network slots on newer firmware report the NAS they're mounted from (e.g. smb://nas.local/Share). */
+  url?: string;
 }
 
 export function parseSlotInfo(p: Record<string, string>, prev?: SlotInfo): SlotInfo {
@@ -161,6 +163,7 @@ export function parseSlotInfo(p: Record<string, string>, prev?: SlotInfo): SlotI
   if ('blocked' in p) s.blocked = bool(p.blocked);
   if ('remaining size' in p) s.remainingSize = Number(p['remaining size']);
   if ('total size' in p) s.totalSize = Number(p['total size']);
+  if ('url' in p) s.url = p.url;
   return s;
 }
 

@@ -74,9 +74,20 @@ export function NetworkDrives({ device, knownClips, onOpen, notify, search, pref
   }, [entries, search, prefs.sortKey, prefs.sortDir]);
 
   const open = (e: NetworkDriveEntry) => setPath([...path, e.name]);
+  const source = sources?.find((s) => s.key === sourceKey);
+  // A file at the root of the deck's own selected NAS is playable even if the deck's disk list
+  // doesn't show it (loading it adds it by name) — hand the viewer a minimal listing for it.
+  const cueable = (e: NetworkDriveEntry): ClipListing | null => {
+    if (!source?.deckSlotId || path.length > 0) return null;
+    const slot = device.state.slots.find((s) => s.slotId === source.deckSlotId);
+    return {
+      slotId: source.deckSlotId, slotLabel: slot?.volumeName || slot?.slotName || 'NAS', isNetwork: true, index: 0,
+      file: e.name, fileFormat: '', videoFormat: '', duration: '', fps: null, frames: null, timelineId: null,
+    };
+  };
   const status = (e: NetworkDriveEntry) => {
     if (e.isDir || !MEDIA_EXT.test(e.name)) return null;
-    const known = findOnDeck(e.name);
+    const known = findOnDeck(e.name) ?? cueable(e);
     return known ? (
       <button type="button" className="btn small ghost" onClick={(ev) => { ev.stopPropagation(); onOpen(known); }}>Open</button>
     ) : (

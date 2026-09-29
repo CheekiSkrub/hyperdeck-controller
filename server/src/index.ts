@@ -15,7 +15,7 @@ import { MediaLocator } from './media/locator.js';
 import { MediaService } from './media/service.js';
 import { registerApi } from './routes/api.js';
 import { registerStatic } from './static.js';
-import { buildInfo } from './buildInfo.js';
+import { buildInfo, isDevBuild } from './buildInfo.js';
 
 const BUILD = buildInfo();
 const VERSION = BUILD.version;
@@ -71,7 +71,9 @@ async function main() {
   const urls = lanUrls(settings.port);
   console.log(`\n  ${APP_NAME} ${VERSION} (${BUILD.commit})\n  Control panel:\n${urls.map((u) => `    ${u}`).join('\n')}\n  Data: ${dataDir}\n`);
 
-  if (settings.openBrowser && !process.env.HDC_NO_BROWSER) openBrowser(`http://localhost:${settings.port}`);
+  // Only a packaged build opens the panel on start: in dev, tsx watch restarts the server on every
+  // code change, which opened a fresh browser tab each time (and the live panel is Vite's :5173 anyway).
+  if (settings.openBrowser && !isDevBuild && !process.env.HDC_NO_BROWSER) openBrowser(`http://localhost:${settings.port}`);
 
   const shutdown = async () => {
     devices.shutdown();

@@ -230,6 +230,8 @@ export interface NasCredential {
 export interface NetworkDriveSource {
   key: string;
   label: string;
+  /** Set when this source is the deck's selected NAS: the deck's slot its root files can be cued from. */
+  deckSlotId?: number;
 }
 
 export interface NetworkDriveEntry {
