@@ -171,6 +171,19 @@ export interface AudioStatus {
   error?: string;
 }
 
+/** A named collection of clips (by file name). */
+export interface ClipGroup {
+  id: string;
+  name: string;
+  files: string[];
+}
+
+/** Per-device tags and groups for sorting the deck's clips. */
+export interface ClipLibrary {
+  tags: Record<string, string[]>;
+  groups: ClipGroup[];
+}
+
 export interface SourcesTest {
   ftp: { ok: boolean; message: string; mediaFiles?: number; folders?: string[] };
   shares: { id: string; label: string; ok: boolean; message: string }[];
@@ -199,6 +212,8 @@ export interface SavedTimeline {
   deviceId: string;
   name: string;
   entries: EditEntry[];
+  /** This is the timeline on the deck; the others are staged. */
+  live?: boolean;
   createdAt: string;
   updatedAt: string;
 }

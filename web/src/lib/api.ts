@@ -1,4 +1,4 @@
-import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost, AppSettings, NasCredential, NetworkDriveSource, NetworkDriveEntry, ShareSpace, AudioStatus} from './types';
+import type {AddressCheck, ClipListing, DeckSettings, Device, EditEntry, MediaInfo, ProxyStatus, SavedTimeline, SourcesTest, StripStatus, TransportInfo, NasBookmark, NasHost, AppSettings, NasCredential, NetworkDriveSource, NetworkDriveEntry, ShareSpace, AudioStatus, ClipLibrary} from './types';
 import { beginRequest } from './busy';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -55,9 +55,15 @@ export const api = {
   setEdit: (id: string, entries: EditEntry[]) => req<EditEntry[]>('PUT', `/api/devices/${id}/edit`, { entries }),
 
   timelines: (id: string) => req<SavedTimeline[]>('GET', `/api/devices/${id}/timelines`),
-  saveTimeline: (id: string, name: string, entries?: EditEntry[]) => req<SavedTimeline>('POST', `/api/devices/${id}/timelines`, { name, entries }),
+  saveTimeline: (id: string, name: string, entries?: EditEntry[], live?: boolean) => req<SavedTimeline>('POST', `/api/devices/${id}/timelines`, { name, entries, live }),
   renameTimeline: (tid: string, name: string) => req<SavedTimeline>('PATCH', `/api/timelines/${tid}`, { name }),
   overwriteTimeline: (tid: string, entries: EditEntry[]) => req<SavedTimeline>('PATCH', `/api/timelines/${tid}`, { entries }),
+  library: (id: string) => req<ClipLibrary>('GET', `/api/devices/${id}/library`),
+  setTags: (id: string, file: string, tags: string[]) => req<ClipLibrary>('PUT', `/api/devices/${id}/library/tags`, { file, tags }),
+  createGroup: (id: string, name: string, files?: string[]) => req<ClipLibrary>('POST', `/api/devices/${id}/library/groups`, { name, files }),
+  updateGroup: (id: string, gid: string, patch: { name?: string; add?: string[]; remove?: string[] }) =>
+    req<ClipLibrary>('PATCH', `/api/devices/${id}/library/groups/${gid}`, patch),
+  deleteGroup: (id: string, gid: string) => req<ClipLibrary>('DELETE', `/api/devices/${id}/library/groups/${gid}`),
   deleteTimeline: (tid: string) => req<void>('DELETE', `/api/timelines/${tid}`),
   loadTimeline: (tid: string) => req<EditEntry[]>('POST', `/api/timelines/${tid}/load`),
   instantReplay: (sourceId: string, body: { seconds: number; targetId: string; mode?: 'append' | 'replace' }) =>

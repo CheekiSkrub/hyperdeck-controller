@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useEditor } from '../lib/editor';
+import { useTimelines } from '../lib/timelines';
 import { fpsFromFormat, framesToTc } from '../lib/tc';
 import type { ClipListing, Device, EditEntry } from '../lib/types';
 import { ClipBrowser } from './ClipBrowser';
@@ -9,6 +10,7 @@ import { SettingsPanel } from './SettingsPanel';
 import { Slots } from './Slots';
 import { EditTimeline } from './EditTimeline';
 import { InstantReplay } from './InstantReplay';
+import { TimelineTabs } from './TimelineTabs';
 import { Transport } from './Transport';
 
 export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => void }) {
@@ -37,7 +39,11 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
   }, [device.id, notify]);
 
   const connected = s.status === 'connected';
-  const editor = useEditor(device, notify);
+  const deckEditor = useEditor(device, notify);
+  const timelines = useTimelines(device, deckEditor, notify);
+  const editor = timelines.editor;
+  const live = timelines.active ? Boolean(timelines.active.live) : true;
+  const [split, setSplit] = useSplit();
 
   /** Open a timeline entry in the viewer, with its in/out as marks. */
   const openEntry = (e: EditEntry, index: number) => {
@@ -102,17 +108,30 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
         <button role="tab" aria-selected={tab === 'settings'} className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>Deck settings</button>
       </div>
 
-      {tab === 'settings' && <SettingsPanel device={device} notify={notify} />}
+      {tab === 'settings' && <div className="pane pane-settings"><SettingsPanel device={device} notify={notify} /></div>}
 
-      {tab === 'control' && connected && s.transport && (
-        <>
-          <Transport device={device} send={send} />
-          <EditTimeline device={device} editor={editor} send={send} notify={notify} onOpen={openEntry} />
-          <Slots device={device} send={send} />
-        </>
+      {tab === 'control' && connected && s.transport && <Transport device={device} send={send} />}
+
+      {tab === 'control' && (
+        <div className="workspace" style={{ gridTemplateRows: `minmax(120px, ${split}fr) 8px minmax(120px, ${1 - split}fr)` }}>
+          <div className="pane pane-timelines">
+            {connected && s.transport ? (
+              <>
+                <TimelineTabs device={device} timelines={timelines} />
+                <EditTimeline key={timelines.active?.id ?? 'deck'} device={device} editor={editor} live={live}
+                  send={send} notify={notify} onOpen={openEntry} />
+              </>
+            ) : (
+              <p className="muted">Timelines appear once the HyperDeck is connected.</p>
+            )}
+          </div>
+          <Splitter onDrag={setSplit} />
+          <div className="pane pane-content">
+            {connected && s.transport && <Slots device={device} send={send} />}
+            <ClipBrowser device={device} onOpen={(clip) => setViewing({ clip })} notify={notify} timelines={timelines.filesByTimeline} />
+          </div>
+        </div>
       )}
-
-      {tab === 'control' && <ClipBrowser device={device} onOpen={(clip) => setViewing({ clip })} notify={notify} />}
 
       {viewing && (
         <ClipViewer
@@ -131,5 +150,35 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
 
       {toast && <div className={`toast ${toast.kind}`} role="status">{toast.text}</div>}
     </div>
+  );
+}
+
+const SPLIT_KEY = 'hdc.workspace.split';
+
+/** Share of the workspace given to the timelines (the rest is content), remembered per browser. */
+function useSplit(): [number, (v: number) => void] {
+  const [split, setSplitState] = useState(() => {
+    try { const v = Number(localStorage.getItem(SPLIT_KEY)); return v > 0.1 && v < 0.9 ? v : 0.5; } catch { return 0.5; }
+  });
+  const setSplit = useCallback((v: number) => {
+    const c = Math.min(0.85, Math.max(0.15, v));
+    setSplitState(c);
+    try { localStorage.setItem(SPLIT_KEY, String(c)); } catch { /* per-viewer convenience only */ }
+  }, []);
+  return [split, setSplit];
+}
+
+/** Drag bar between the timelines and the content. */
+function Splitter({ onDrag }: { onDrag: (share: number) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const move = (e: React.PointerEvent) => {
+    if (!(e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) return;
+    const box = ref.current?.parentElement?.getBoundingClientRect();
+    if (box) onDrag((e.clientY - box.top) / box.height);
+  };
+  return (
+    <div ref={ref} className="splitter" role="separator" aria-orientation="horizontal" aria-label="Resize timelines and content"
+      onPointerDown={(e) => (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)}
+      onPointerMove={move} />
   );
 }

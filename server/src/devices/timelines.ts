@@ -10,12 +10,18 @@ import { ValidationError } from './store.js';
  * the deck between them, instead of only ever having "whatever's on the
  * deck right now". Loading one applies it to the deck the same way any
  * other edit is applied (PUT /api/devices/:id/edit).
+ *
+ * At most one timeline per device is `live`: the one on the deck. Edits to it go to the deck
+ * (and are saved back here); the others are staged — edited and saved without touching the deck,
+ * ready to be sent to it.
  */
 export interface SavedTimeline {
   id: string;
   deviceId: string;
   name: string;
   entries: EditEntry[];
+  /** This is the timeline currently on the deck. */
+  live?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -35,18 +41,20 @@ export class TimelineStore {
   }
 
   list(deviceId: string): SavedTimeline[] {
-    return this.timelines.filter((t) => t.deviceId === deviceId).sort((a, b) => a.name.localeCompare(b.name));
+    // Creation order, so tabs stay put (Timeline 1, Timeline 2, …) when one is renamed.
+    return this.timelines.filter((t) => t.deviceId === deviceId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   get(id: string): SavedTimeline | undefined {
     return this.timelines.find((t) => t.id === id);
   }
 
-  create(deviceId: string, name: string, entries: EditEntry[]): SavedTimeline {
+  create(deviceId: string, name: string, entries: EditEntry[], live = false): SavedTimeline {
     const n = name.trim();
     if (!n) throw new ValidationError('Name is required');
     const now = new Date().toISOString();
-    const t: SavedTimeline = { id: crypto.randomUUID(), deviceId, name: n, entries, createdAt: now, updatedAt: now };
+    if (live) for (const o of this.timelines) if (o.deviceId === deviceId) o.live = false;
+    const t: SavedTimeline = { id: crypto.randomUUID(), deviceId, name: n, entries, live: live || undefined, createdAt: now, updatedAt: now };
     this.timelines.push(t);
     this.save();
     return t;
@@ -62,6 +70,19 @@ export class TimelineStore {
     }
     if (patch.entries !== undefined) t.entries = patch.entries;
     t.updatedAt = new Date().toISOString();
+    this.save();
+    return t;
+  }
+
+  live(deviceId: string): SavedTimeline | undefined {
+    return this.timelines.find((t) => t.deviceId === deviceId && t.live);
+  }
+
+  /** Mark `id` as the timeline on its deck (and no other). */
+  setLive(id: string): SavedTimeline {
+    const t = this.get(id);
+    if (!t) throw new ValidationError('Saved timeline not found');
+    for (const o of this.timelines) if (o.deviceId === t.deviceId) o.live = o.id === id || undefined;
     this.save();
     return t;
   }

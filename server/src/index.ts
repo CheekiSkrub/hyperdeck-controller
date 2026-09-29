@@ -9,6 +9,7 @@ import { DeviceManager } from './devices/manager.js';
 import { DeviceStore } from './devices/store.js';
 import { TestDeckManager } from './devices/testDeck.js';
 import { TimelineStore } from './devices/timelines.js';
+import { LibraryStore } from './devices/library.js';
 import { configureFfmpeg } from './media/ffmpeg.js';
 import { FtpBridge } from './media/ftpBridge.js';
 import { MediaLocator } from './media/locator.js';
@@ -31,6 +32,7 @@ async function main() {
   const testDecks = new TestDeckManager(store, devices, settings.cacheDir, () => configureFfmpeg(settings));
   await testDecks.restoreAll();
   const timelines = new TimelineStore(dataDir);
+  const library = new LibraryStore(dataDir);
   const credentials = new CredentialStore(dataDir);
   const bridge = new FtpBridge();
   bridge.setPort(settings.port);
@@ -64,7 +66,7 @@ async function main() {
   });
 
   bridge.register(app, (id) => store.get(id));
-  await registerApi(app, { devices, testDecks, timelines, credentials, media, locator, bridge, settings, dataDir, version: VERSION, build: BUILD, ffmpegOk: ff.ok });
+  await registerApi(app, { devices, testDecks, timelines, library, credentials, media, locator, bridge, settings, dataDir, version: VERSION, build: BUILD, ffmpegOk: ff.ok });
   registerStatic(app);
 
   await app.listen({ port: settings.port, host: settings.host });

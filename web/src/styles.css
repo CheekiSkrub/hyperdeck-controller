@@ -81,7 +81,17 @@ h2 { font-size: 16px; }
 
 .empty { display: grid; place-content: center; text-align: center; height: 100%; gap: 12px; }
 
-.device-view { padding: 24px 28px 60px; display: flex; flex-direction: column; gap: 16px; max-width: 1400px; }
+/* Full-height working surface: header + transport (timecode) pinned at the top, then a split
+   workspace — timelines above, content below — each scrolling on its own. */
+.device-view { padding: 16px 24px 12px; display: flex; flex-direction: column; gap: 12px; height: 100%; box-sizing: border-box; min-height: 0; }
+.workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.pane { overflow: auto; min-height: 0; min-width: 0; }
+.pane-settings { flex: 1; }
+.pane-content { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
+.splitter { cursor: row-resize; position: relative; touch-action: none; }
+.splitter::after { content: ""; position: absolute; left: 0; right: 0; top: 3px; height: 2px; border-radius: 2px; background: var(--line); }
+.splitter:hover::after { background: var(--accent); }
+@media (max-width: 860px) { .device-view { height: auto; } .workspace { display: flex; flex-direction: column; } .splitter { display: none; } }
 .device-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .head-actions { display: flex; gap: 8px; align-items: center; }
 .conn { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); }
@@ -541,3 +551,30 @@ button.nd-entry:hover { background: var(--panel-2); }
 .vu-fill { position: absolute; inset: 0; background: linear-gradient(to top, var(--go) 0 70%, var(--warn) 70% 90%, var(--rec) 90%); }
 .vu-hold { position: absolute; left: 0; right: 0; height: 2px; margin-bottom: -1px; background: #fff; opacity: .85; }
 .vu-label { font-size: 9px; line-height: 11px; text-align: center; color: var(--muted); }
+
+/* ------------------------------------------------------------------ timeline tabs */
+.tl-tabs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.tl-tab { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: pointer; font-size: 13px; user-select: none; }
+.tl-tab:hover { border-color: #45505c; }
+.tl-tab.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+.tl-tab.live .tl-tab-name { font-weight: 600; }
+.tl-tab input { width: 140px; font: inherit; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+.tl-tab-x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; }
+.tl-tab-x:hover { color: var(--rec); }
+.badge.live { background: color-mix(in srgb, var(--go) 25%, #111); color: #7ee2ad; }
+.pane-timelines .timeline { margin: 0; }
+
+/* ------------------------------------------------------------------ clip folders, tags */
+.folder-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
+.folder-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--text); font-size: 12px; cursor: pointer; }
+.folder-chip:hover { border-color: #45505c; }
+.folder-chip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.folder-chip.auto { border-style: dashed; }
+.folder-chip.drop { border-color: var(--go); background: color-mix(in srgb, var(--go) 18%, transparent); }
+.folder-chip.add { color: var(--muted); }
+.folder-chip.tag-chip { color: #c6b3ff; }
+.folder-x { margin-left: 2px; color: var(--muted); font-size: 14px; line-height: 1; }
+.folder-x:hover { color: var(--rec); }
+.clip-tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 10px 8px; }
+.clip-table .clip-tags { display: inline-flex; padding: 0 0 0 8px; }
+.clip-tag { font-size: 11px; color: #c6b3ff; background: color-mix(in srgb, #8b6cff 16%, transparent); border-radius: 4px; padding: 0 5px; }

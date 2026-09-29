@@ -4,7 +4,6 @@ import { levelsAt, useAudioLevels, type AudioLevels } from '../lib/audio';
 import { entryLength, isSlice, type Editor } from '../lib/editor';
 import { useLiveFrames } from '../lib/liveFrames';
 import { useMediaEvents } from '../lib/store';
-import { SavedTimelines } from './SavedTimelines';
 import { VuMeters } from './VuMeters';
 import { Waveform } from './Waveform';
 import { fpsFromFormat, framesToTc, tcToFrames } from '../lib/tc';
@@ -73,9 +72,11 @@ function nearestReadyTile(st: StripStatus, seconds: number): number {
  * scrolling that follows playback. Clips butt together because the deck's
  * timeline has no gaps — trims ripple.
  */
-export function EditTimeline({ device, editor, send, notify, onOpen }: {
+export function EditTimeline({ device, editor, live = true, send, notify, onOpen }: {
   device: Device;
   editor: Editor;
+  /** This timeline is the one on the deck. A staged one has its own cursor and never drives the deck. */
+  live?: boolean;
   send: Send;
   notify: (m: string, kind?: 'ok' | 'err') => void;
   onOpen: (entry: EditEntry, index: number, frame?: number) => void;
@@ -162,7 +163,8 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
   // ------------------------------------------------------------------ playhead
   const livePos = useLiveFrames(t.timeline ?? 0, t.status, t.speed, fps);
   const [scrubbing, setScrubbing] = useState<number | null>(null);
-  const pos = Math.max(0, Math.min(Math.max(0, total - 1), scrubbing ?? livePos));
+  const [cursor, setCursor] = useState(0); // a staged timeline's own playhead
+  const pos = Math.max(0, Math.min(Math.max(0, total - 1), scrubbing ?? (live ? livePos : cursor)));
   const lastScrubSent = useRef(0);
 
   // Which clip the playhead is over, and how much time is left in it and in the whole timeline —
@@ -177,7 +179,7 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
   // Page-scroll to follow the playhead during playback (Premiere "page scroll").
   useEffect(() => {
     const el = scroller.current;
-    if (!el || scrubbing !== null || !MOVING.has(t.status)) return;
+    if (!el || !live || scrubbing !== null || !MOVING.has(t.status)) return;
     const x = pos * scale;
     if (x > el.scrollLeft + el.clientWidth - 24) el.scrollLeft = x - 40;
     else if (x < el.scrollLeft) el.scrollLeft = Math.max(0, x - el.clientWidth + 80);
@@ -192,6 +194,7 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
   const scrubTo = (f: number, final: boolean) => {
     const frame = clamp(f, 0, Math.max(0, total - 1));
     setScrubbing(frame);
+    if (!live) { if (final) setCursor(frame); return; }
     const now = performance.now();
     if (final || now - lastScrubSent.current > 50) {
       lastScrubSent.current = now;
@@ -222,7 +225,7 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
   // only while the deck is actually moving (or being scrubbed), otherwise the meters fall away.
   const meterChannels = Math.max(2, ...Object.values(audio).map((l) => (l ? l.channels : 0)));
   const meterLevels = (() => {
-    if (currentClipIndex < 0 || !(MOVING.has(t.status) || scrubbing !== null)) return null;
+    if (!live || currentClipIndex < 0 || !(MOVING.has(t.status) || scrubbing !== null)) return null;
     const e = entries[currentClipIndex];
     const lv = audio[e.file];
     return lv ? levelsAt(lv, (e.in + pos - starts[currentClipIndex]) / fps) : null;
@@ -370,8 +373,9 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
     <section className="card timeline editor">
       <div className="timeline-head">
         <span>
-          Timeline · {entries.length} clip{entries.length === 1 ? '' : 's'} · <span className="muted">{activeLabel}</span>
-          {editor.busy && <span className="muted"> · updating deck…</span>}
+          {entries.length} clip{entries.length === 1 ? '' : 's'} · <span className="muted">{activeLabel}</span>
+          {!live && <span className="muted"> · staged — not on the deck</span>}
+          {editor.busy && <span className="muted"> · {live ? 'updating deck…' : 'saving…'}</span>}
         </span>
         <span className="tl-tools">
           <span className="mono tl-pos">{framesToTc(pos, fps)}</span>
@@ -429,7 +433,7 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
               {entries.length === 0 && <div className="tl-empty muted" style={{ width: view.width - 16 }}>Drag clips here to build the deck's playlist</div>}
               {entries.map((e, i) => {
                 const w = lengths[i] * scale;
-                const current = t.clipId === i + 1;
+                const current = live && t.clipId === i + 1;
                 return (
                   <div
                     key={`${i}-${e.file}`}
@@ -488,8 +492,8 @@ export function EditTimeline({ device, editor, send, notify, onOpen }: {
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} role="menu" onClick={(e) => e.stopPropagation()}>
           {menu.index !== null ? (
             <>
-              <button role="menuitem" onClick={() => { setMenu(null); void send('goto', { 'clip id': menu.index! + 1 }); }}>Cue this clip</button>
-              <button role="menuitem" onClick={() => { setMenu(null); void send('goto', { timeline: menu.frame }).then(() => send('play')); }}>Play from here</button>
+              {live && <button role="menuitem" onClick={() => { setMenu(null); void send('goto', { 'clip id': menu.index! + 1 }); }}>Cue this clip</button>}
+              {live && <button role="menuitem" onClick={() => { setMenu(null); void send('goto', { timeline: menu.frame }).then(() => send('play')); }}>Play from here</button>}
               <button role="menuitem" onClick={() => { setMenu(null); onOpen(entries[menu.index!], menu.index!); }}>Open in viewer…</button>
               <hr />
               <button role="menuitem" onClick={() => { setMenu(null); splitAt(menu.frame); }}>Split here</button>

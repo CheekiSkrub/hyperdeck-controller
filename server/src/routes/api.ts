@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import type { BuildInfo } from '../buildInfo.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { saveSettings, type Settings } from '../config.js';
-import type { EditEntry } from '../devices/edit.js';
+import { EditError, validateEdit, type EditEntry } from '../devices/edit.js';
+import type { LibraryStore } from '../devices/library.js';
 import { CommandError, type DeviceManager } from '../devices/manager.js';
 import { ValidationError, type DeviceInput } from '../devices/store.js';
 import type { TestDeckManager } from '../devices/testDeck.js';
@@ -17,6 +18,7 @@ interface Ctx {
   devices: DeviceManager;
   testDecks: TestDeckManager;
   timelines: TimelineStore;
+  library: LibraryStore;
   credentials: CredentialStore;
   media: MediaService;
   locator: MediaLocator;
@@ -115,6 +117,7 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     devices.remove(req.params.id);
     media.invalidate(req.params.id);
     ctx.timelines.removeForDevice(req.params.id);
+    ctx.library.removeForDevice(req.params.id);
     reply.status(204);
   });
 
@@ -143,25 +146,47 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
     reply.type('text/plain').send(devices.client(req.params.id).trace.join('\n')));
 
   app.put<IdParams>('/api/devices/:id/edit', async (req) => {
-    return devices.setEdit(req.params.id, (req.body as { entries: unknown }).entries);
+    const result = await devices.setEdit(req.params.id, (req.body as { entries: unknown }).entries);
+    // Keep the saved copy of the live timeline in step with the deck.
+    const live = ctx.timelines.live(req.params.id);
+    if (live) ctx.timelines.update(live.id, { entries: result });
+    return result;
   });
 
   // ------------------------------------------------------------------ Saved timelines
 
-  app.get<IdParams>('/api/devices/:id/timelines', async (req) => ctx.timelines.list(req.params.id));
+  app.get<IdParams>('/api/devices/:id/timelines', async (req) => {
+    // Other paths change the deck's timeline too (cueing a clip, instant replay, the deck's own
+    // controls), so bring the live timeline's saved copy up to date whenever the list is read.
+    const state = devices.client(req.params.id).state;
+    const live = ctx.timelines.live(req.params.id);
+    if (live && state.status === 'connected' && JSON.stringify(live.entries) !== JSON.stringify(state.edit)) {
+      ctx.timelines.update(live.id, { entries: state.edit });
+    }
+    // The deck always has a timeline tab: adopt what's on it — "Timeline 1" on a first visit, or
+    // "On deck" alongside timelines saved before one could be live. Done here, not in the panel,
+    // so two browsers (or React's double-mount) can't both create one.
+    if (!live) {
+      const n = ctx.timelines.list(req.params.id).length;
+      ctx.timelines.create(req.params.id, n ? 'On deck' : 'Timeline 1', state.edit, true);
+    }
+    return ctx.timelines.list(req.params.id);
+  });
 
   app.post<IdParams>('/api/devices/:id/timelines', async (req, reply) => {
-    const b = req.body as { name: string; entries?: EditEntry[] };
+    const b = req.body as { name: string; entries?: EditEntry[]; live?: boolean };
     if (!b?.name) throw new ValidationError('Name is required');
-    const entries = b.entries ?? devices.client(req.params.id).state.edit;
-    const t = ctx.timelines.create(req.params.id, b.name, entries);
+    const entries = b.entries ? checkedEntries(req.params.id, b.entries) : devices.client(req.params.id).state.edit;
+    const t = ctx.timelines.create(req.params.id, b.name, entries, Boolean(b.live));
     reply.status(201);
     return t;
   });
 
   app.patch<{ Params: { tid: string } }>('/api/timelines/:tid', async (req) => {
     const b = req.body as { name?: string; entries?: EditEntry[] };
-    return ctx.timelines.update(req.params.tid, b);
+    const t = ctx.timelines.get(req.params.tid);
+    if (!t) throw new ValidationError('Saved timeline not found');
+    return ctx.timelines.update(req.params.tid, { ...b, entries: b.entries ? checkedEntries(t.deviceId, b.entries) : undefined });
   });
 
   app.delete<{ Params: { tid: string } }>('/api/timelines/:tid', async (req, reply) => {
@@ -172,8 +197,45 @@ export async function registerApi(app: FastifyInstance, ctx: Ctx) {
   app.post<{ Params: { tid: string } }>('/api/timelines/:tid/load', async (req) => {
     const t = ctx.timelines.get(req.params.tid);
     if (!t) throw new ValidationError('Saved timeline not found');
-    return devices.setEdit(t.deviceId, t.entries);
+    const result = await devices.setEdit(t.deviceId, t.entries);
+    ctx.timelines.setLive(t.id);
+    ctx.timelines.update(t.id, { entries: result });
+    return result;
   });
+
+  /**
+   * Staged timelines get the same checks as the deck's (clips on the active media, one video
+   * format), so a problem shows up while cueing it up rather than when it's sent to the deck.
+   * Skipped while the deck is offline — there's nothing to check against.
+   */
+  function checkedEntries(deviceId: string, entries: EditEntry[]): EditEntry[] {
+    const state = devices.client(deviceId).state;
+    if (state.status !== 'connected' || !state.transport?.slotId) return entries;
+    try {
+      return validateEdit(entries, state);
+    } catch (e) {
+      if (e instanceof EditError) throw new CommandError(e.message, 409);
+      throw e;
+    }
+  }
+
+  // ------------------------------------------------------------------ Clip library (tags, groups)
+
+  app.get<IdParams>('/api/devices/:id/library', async (req) => ctx.library.get(req.params.id));
+  app.put<IdParams>('/api/devices/:id/library/tags', async (req) => {
+    const b = req.body as { file: string; tags: string[] };
+    return ctx.library.setTags(req.params.id, String(b?.file ?? ''), Array.isArray(b?.tags) ? b.tags.map(String) : []);
+  });
+  app.post<IdParams>('/api/devices/:id/library/groups', async (req) => {
+    const b = req.body as { name: string; files?: string[] };
+    return ctx.library.createGroup(req.params.id, String(b?.name ?? ''), Array.isArray(b?.files) ? b.files.map(String) : []);
+  });
+  app.patch<{ Params: { id: string; gid: string } }>('/api/devices/:id/library/groups/:gid', async (req) => {
+    const b = req.body as { name?: string; add?: string[]; remove?: string[] };
+    return ctx.library.updateGroup(req.params.id, req.params.gid, b ?? {});
+  });
+  app.delete<{ Params: { id: string; gid: string } }>('/api/devices/:id/library/groups/:gid', async (req) =>
+    ctx.library.removeGroup(req.params.id, req.params.gid));
 
   // Instant replay: take the last N seconds of :id's current/most recent clip
   // and put it on another device's timeline (works when that device can also
