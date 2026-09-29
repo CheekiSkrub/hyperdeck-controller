@@ -333,8 +333,8 @@ export async function createMockDeck(opts: MockDeckOptions): Promise<MockDeck> {
       if (deck.loop) deck.position = 0;
       else { deck.position = Math.max(0, Math.min(deck.position, totalFrames() - 1)); deck.status = 'stopped'; deck.speed = 0; pushTransport(); }
     }
-    notify('display timecode', 515, 'display timecode info', [`display timecode: ${tc(deck.position)}`]);
-    notify('timeline position', 516, 'timeline position info', [`timeline: ${deck.position}`]);
+    notify('display timecode', 513, 'display timecode', [`display timecode: ${tc(deck.position)}`]);
+    notify('timeline position', 514, 'timeline position', [`timeline: ${deck.position}`]);
   }, 1000 / FPS);
 
   // ---------------------------------------------------------------- command handling

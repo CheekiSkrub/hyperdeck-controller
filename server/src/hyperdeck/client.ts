@@ -97,6 +97,7 @@ export class HyperDeckClient extends EventEmitter {
    */
   /** Recent protocol traffic for diagnosing real decks (GET /api/devices/:id/debug/protocol). */
   readonly trace: string[] = [];
+  private diskTimer: NodeJS.Timeout | null = null;
   private quietUntil = 0;
   private quietTimer: NodeJS.Timeout | null = null;
 
@@ -245,7 +246,8 @@ export class HyperDeckClient extends EventEmitter {
   }
 
   private onResponse(r: HyperDeckResponse): void {
-    if (r.code !== 508 && r.code !== 515 && r.code !== 516) this.log(`< ${r.code} ${r.text}${r.lines.length ? ` (${r.lines.length} lines)` : ''}${this.inFlight ? '' : ' [nothing in flight]'}`);
+    const perFrame = ['transport', 'display timecode', 'timeline position'].includes(asyncKind(r) ?? '');
+    if (!(r.code >= 500 && r.code < 600 && perFrame)) this.log(`< ${r.code} ${r.text}${r.lines.length ? ` (${r.lines.length} lines)` : ''}${this.inFlight ? '' : ' [nothing in flight]'}`);
     if (r.code >= 500 && r.code < 600) {
       if (r.code === 500) this.emit('_greeting', r);
       this.onAsync(r);
@@ -271,11 +273,12 @@ export class HyperDeckClient extends EventEmitter {
   }
 
   private onAsync(r: HyperDeckResponse): void {
+    const kind = asyncKind(r);
     // Transport/timecode notifications arrive up to once per frame; they go out
     // on a lightweight fast path instead of the full (debounced) state.
-    const fast = r.code === 508 || r.code === 515 || r.code === 516;
-    switch (r.code) {
-      case 502: {
+    const fast = kind === 'transport' || kind === 'display timecode' || kind === 'timeline position';
+    switch (kind) {
+      case 'slot': {
         const id = Number(r.params['slot id']);
         // Seen on a Shuttle HD (8.4.1) after reselecting its NAS: a slot notification with no
         // slot id. Don't file it under a bogus "slot null" — re-read every slot instead.
@@ -287,26 +290,26 @@ export class HyperDeckClient extends EventEmitter {
         const prev = this.state.slots.find((s) => s.slotId === id);
         const next = parseSlotInfo(r.params, prev);
         this.state.slots = [...this.state.slots.filter((s) => s.slotId !== id), next].sort((a, b) => a.slotId - b.slotId);
-        void this.refreshDisk(id).catch(() => {});
+        this.scheduleDiskRefresh();
         void this.refreshNas().catch(() => {});
         break;
       }
-      case 508:
+      case 'transport':
         this.state.transport = parseTransportInfo(r.params, this.state.transport ?? undefined);
         break;
-      case 510:
+      case 'remote':
         this.state.remote = { enabled: r.params.enabled === 'true', override: r.params.override === 'true' };
         break;
-      case 512: // clips info (timeline changed)
+      case 'clips': // timeline changed
         void this.refreshTimeline().catch(() => {});
         break;
-      case 513: // disk info (files added/removed)
-        for (const s of this.state.slots) if (s.status === 'mounted') void this.refreshDisk(s.slotId).catch(() => {});
+      case 'disk': // files added/removed
+        this.scheduleDiskRefresh();
         break;
-      case 515:
+      case 'display timecode':
         if (this.state.transport && r.params['display timecode']) this.state.transport.displayTimecode = r.params['display timecode'];
         break;
-      case 516:
+      case 'timeline position':
         if (this.state.transport && r.params.timeline) this.state.transport.timeline = Number(r.params.timeline);
         this.lastPositionAt = Date.now();
         break;
@@ -315,6 +318,15 @@ export class HyperDeckClient extends EventEmitter {
     }
     if (fast) this.emitTransport();
     else this.emitState();
+  }
+
+  /** Re-list every mounted slot, coalescing bursts of disk/slot notifications into one pass. */
+  private scheduleDiskRefresh(): void {
+    if (this.diskTimer) return;
+    this.diskTimer = setTimeout(() => {
+      this.diskTimer = null;
+      for (const s of this.state.slots) if (s.status === 'mounted') void this.refreshDisk(s.slotId).catch(() => {});
+    }, 500);
   }
 
   /** Emit transport immediately, at most once per ~frame (15 ms), always sending the latest. */
@@ -426,13 +438,24 @@ export class HyperDeckClient extends EventEmitter {
   }
 
   async refreshTimeline(): Promise<void> {
-    let r: HyperDeckResponse;
+    // An empty timeline isn't an error to us, but the deck answers `clips get` with "107 timeline
+    // empty" — which used to abort the refresh and leave the last removed clip showing.
+    const empty = (e: unknown) => e instanceof HyperDeckError && e.code === 107;
+    let r: HyperDeckResponse | null;
     try {
       r = await this.send('clips get', { version: 3 }, 10000);
-    } catch {
-      r = await this.send('clips get', undefined, 10000);
+    } catch (e) {
+      if (empty(e)) r = null;
+      else {
+        try {
+          r = await this.send('clips get', undefined, 10000);
+        } catch (e2) {
+          if (!empty(e2)) throw e2;
+          r = null;
+        }
+      }
     }
-    this.state.timeline = parseClipsGet(r.lines);
+    this.state.timeline = r ? parseClipsGet(r.lines) : [];
     this.state.edit = editFromState(this.state, this);
     this.emitState();
   }
@@ -486,6 +509,25 @@ export class HyperDeckClient extends EventEmitter {
     }
     this.emit('state', this.state);
   }
+}
+
+type AsyncKind = 'slot' | 'transport' | 'remote' | 'clips' | 'disk' | 'display timecode' | 'timeline position';
+
+/**
+ * What an asynchronous (5xx) notification is about. Decided by its title, because the numbers
+ * vary by firmware: a Shuttle HD (protocol 1.18) sends "513 display timecode" and "514 timeline
+ * position", where we'd assumed 515/516 — and 513 was being read as "disk changed", so every
+ * frame of playback re-listed the whole disk. The code is only a fallback for unknown titles.
+ */
+export function asyncKind(r: HyperDeckResponse): AsyncKind | null {
+  const title = r.text.trim().toLowerCase().replace(/ info$/, '');
+  const byTitle: Record<string, AsyncKind> = {
+    slot: 'slot', transport: 'transport', remote: 'remote', clips: 'clips',
+    disk: 'disk', 'disk list': 'disk', 'display timecode': 'display timecode', 'timeline position': 'timeline position',
+  };
+  if (byTitle[title]) return byTitle[title];
+  const byCode: Record<number, AsyncKind> = { 502: 'slot', 508: 'transport', 510: 'remote', 512: 'clips' };
+  return byCode[r.code] ?? null;
 }
 
 /**
