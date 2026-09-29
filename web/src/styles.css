@@ -88,6 +88,8 @@ h2 { font-size: 16px; }
 .pane { overflow: auto; min-height: 0; min-width: 0; }
 .pane-settings { flex: 1; }
 .pane-content { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
+/* Sections keep their natural height and the pane scrolls — otherwise flex squashes them and clips the slot cards. */
+.pane-content > * { flex-shrink: 0; }
 .splitter { cursor: row-resize; position: relative; touch-action: none; }
 .splitter::after { content: ""; position: absolute; left: 0; right: 0; top: 3px; height: 2px; border-radius: 2px; background: var(--line); }
 .splitter:hover::after { background: var(--accent); }

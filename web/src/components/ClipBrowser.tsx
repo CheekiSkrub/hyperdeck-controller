@@ -23,11 +23,12 @@ export interface TimelineFolder { id: string; name: string; live: boolean; files
 type Folder = { kind: 'timeline' | 'group' | 'tag'; id: string } | null;
 type Menu = { x: number; y: number; clip: ClipListing } | null;
 
-export function ClipBrowser({ device, onOpen, notify, timelines = [] }: {
+export function ClipBrowser({ device, onOpen, notify, timelines = [], onRenameTimeline }: {
   device: Device;
   onOpen: (c: ClipListing) => void;
   notify: (m: string) => void;
   timelines?: TimelineFolder[];
+  onRenameTimeline?: (id: string, name: string) => void;
 }) {
   const library = useLibrary(device.id, notify);
   const { lib } = library;
@@ -93,7 +94,7 @@ export function ClipBrowser({ device, onOpen, notify, timelines = [] }: {
             sortOptions={[{ key: 'name', label: 'Name' }, { key: 'date', label: 'Date modified' }, { key: 'size', label: 'Size' }]} />
         )}
       </div>
-      {mode === 'clips' && <FolderBar library={library} timelines={timelines} folder={folder} setFolder={setFolder} />}
+      {mode === 'clips' && <FolderBar library={library} timelines={timelines} folder={folder} setFolder={setFolder} onRenameTimeline={onRenameTimeline} />}
       {mode === 'network' ? (
         <NetworkDrives device={device} knownClips={clips} onOpen={onOpen} notify={notify} search={netSearch} prefs={prefs} />
       ) : s.status !== 'connected' && clips.length === 0 ? (
@@ -119,12 +120,21 @@ export function ClipBrowser({ device, onOpen, notify, timelines = [] }: {
  * uses), the user's own groups, and one per tag. Click to filter; drag clips onto a group to add
  * them; double-click a group to rename it.
  */
-function FolderBar({ library, timelines, folder, setFolder }: {
+function FolderBar({ library, timelines, folder, setFolder, onRenameTimeline }: {
   library: Library;
   timelines: TimelineFolder[];
   folder: Folder;
   setFolder: (f: Folder) => void;
+  onRenameTimeline?: (id: string, name: string) => void;
 }) {
+  const renameTimeline = (t: TimelineFolder) => {
+    const n = window.prompt('Rename timeline', t.name);
+    if (n?.trim() && onRenameTimeline) onRenameTimeline(t.id, n.trim());
+  };
+  const renameGroup = (id: string, name: string) => {
+    const n = window.prompt('Rename group', name);
+    if (n?.trim()) void library.renameGroup(id, n.trim());
+  };
   const { lib } = library;
   const [dropOn, setDropOn] = useState<string | null>(null);
   const tags = useMemo(() => [...new Set(Object.values(lib.tags).flat())].sort((a, b) => a.localeCompare(b)), [lib.tags]);
@@ -147,18 +157,20 @@ function FolderBar({ library, timelines, folder, setFolder }: {
     <div className="folder-bar">
       {timelines.map((t) => (
         <button key={t.id} className={`folder-chip auto ${is('timeline', t.id) ? 'on' : ''}`} onClick={() => toggle('timeline', t.id)}
-          title={`Clips on ${t.name} (automatic)`}>
+          onContextMenu={(e) => { e.preventDefault(); renameTimeline(t); }}
+          title={`Clips on ${t.name} (automatic) — right-click to rename the timeline`}>
           <span aria-hidden>▤</span> {t.name}{t.live && <span className="badge live small">LIVE</span>} <span className="muted small">{t.files.length}</span>
         </button>
       ))}
       {lib.groups.map((g) => (
         <button key={g.id} className={`folder-chip ${is('group', g.id) ? 'on' : ''} ${dropOn === g.id ? 'drop' : ''}`}
           onClick={() => toggle('group', g.id)}
-          onDoubleClick={() => { const n = window.prompt('Rename group', g.name); if (n?.trim()) void library.renameGroup(g.id, n.trim()); }}
+          onDoubleClick={() => renameGroup(g.id, g.name)}
+          onContextMenu={(e) => { e.preventDefault(); renameGroup(g.id, g.name); }}
           onDragOver={(e) => { if (e.dataTransfer.types.includes(CLIP_MIME)) { e.preventDefault(); setDropOn(g.id); } }}
           onDragLeave={() => setDropOn(null)}
           onDrop={(e) => dropClip(e, g.id)}
-          title="Your group — drop clips here to add them; double-click to rename">
+          title="Your group — drop clips here to add them; double-click or right-click to rename">
           <span aria-hidden>📁</span> {g.name} <span className="muted small">{g.files.length}</span>
           {is('group', g.id) && (
             <span className="folder-x" role="button" aria-label={`Delete group ${g.name}`}

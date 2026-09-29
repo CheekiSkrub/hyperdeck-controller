@@ -128,7 +128,7 @@ export function DeviceView({ device, onEdit }: { device: Device; onEdit: () => v
           <Splitter onDrag={setSplit} />
           <div className="pane pane-content">
             {connected && s.transport && <Slots device={device} send={send} />}
-            <ClipBrowser device={device} onOpen={(clip) => setViewing({ clip })} notify={notify} timelines={timelines.filesByTimeline} />
+            <ClipBrowser device={device} onOpen={(clip) => setViewing({ clip })} notify={notify} timelines={timelines.filesByTimeline} onRenameTimeline={(id, name) => void timelines.rename(id, name)} />
           </div>
         </div>
       )}
