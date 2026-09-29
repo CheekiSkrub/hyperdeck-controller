@@ -329,11 +329,8 @@ export class MediaLocator {
       const conn = await this.ensureConnected(root, username, password);
       if (!conn.ok) return conn;
     }
-    const resolvedRoot = path.resolve(root);
-    const resolvedTarget = path.resolve(subPath ? path.join(root, subPath) : root);
-    if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(resolvedRoot + path.sep)) {
-      return { ok: false, message: 'That path is outside the mapped folder.' };
-    }
+    const resolvedTarget = this.resolveEntryPath(root, subPath ?? '');
+    if (!resolvedTarget) return { ok: false, message: 'That path is outside the mapped folder.' };
     try {
       const st = await fs.promises.stat(resolvedTarget);
       if (!st.isDirectory()) return { ok: false, message: 'Path exists but is not a folder' };
@@ -349,7 +346,7 @@ export class MediaLocator {
           }),
       );
       entries.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
-      return { ok: true, message: `${entries.length} item${entries.length === 1 ? '' : 's'}`, path: path.relative(resolvedRoot, resolvedTarget) || '.', entries };
+      return { ok: true, message: `${entries.length} item${entries.length === 1 ? '' : 's'}`, path: path.relative(path.resolve(root), resolvedTarget) || '.', entries };
     } catch (e) {
       return { ok: false, message: `Cannot read ${resolvedTarget}: ${(e as Error).message}` };
     }
@@ -364,7 +361,10 @@ export class MediaLocator {
   resolveEntryPath(root: string, relPath: string): string | null {
     const resolvedRoot = path.resolve(root);
     const target = path.resolve(path.join(root, relPath));
-    if (target !== resolvedRoot && !target.startsWith(resolvedRoot + path.sep)) return null;
+    // A share or drive root resolves *with* a trailing separator (\\nas\share\ , C:\), so only
+    // add one when it's missing — otherwise every file at the root of a share was "outside" it.
+    const prefix = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
+    if (target !== resolvedRoot && !target.startsWith(prefix)) return null;
     return target;
   }
 
